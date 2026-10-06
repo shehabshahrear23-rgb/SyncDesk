@@ -36,15 +36,41 @@ const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
     setClickEffect(true);
     setIsLoading(true);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      setClickEffect(false);
-      const authResult = authenticateUser(email, password);
+    setTimeout(async () => {
+      try {
+        // 1. Convert credentials to URL-encoded Form Data
+        const formData = new URLSearchParams();
+        formData.append('username', email); // FastAPI OAuth2 strictly expects "username"
+        formData.append('password', password);
 
-      if (authResult.success) {
-        onLogin(authResult.user);
-      } else {
-        setError(authResult.message || 'Authentication failed. Please verify credentials.');
+        // 2. Send as application/x-www-form-urlencoded
+        const response = await fetch('http://127.0.0.1:8000/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData,
+        });
+
+        const data = await response.json();
+
+        setIsLoading(false);
+        setClickEffect(false);
+
+        if (response.ok) {
+          // Save the real JWT token to local storage so the session persists
+          localStorage.setItem('syncdesk_token', data.access_token);
+          
+          // Send the real database user profile back to App.jsx
+          onLogin(data.user);
+        } else {
+          // Read the exact error detail sent by FastAPI (e.g., 401 Unauthorized)
+          setError(data.detail || 'Invalid email or password credentials.');
+        }
+      } catch (err) {
+        setIsLoading(false);
+        setClickEffect(false);
+        setError('Server Connection Error: Is your FastAPI backend running on port 8000?');
       }
     }, 600);
   };
