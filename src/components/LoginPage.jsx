@@ -75,53 +75,41 @@ const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
     setClickEffect(true);
     setIsLoading(true);
 
-    // 1) Real accounts: ask the FastAPI backend for a JWT
-    let backendOffline = false;
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password })
-      });
+    setTimeout(async () => {
+      try {
+        // 1. Convert credentials to URL-encoded Form Data
+        const formData = new URLSearchParams();
+        formData.append('username', email); // FastAPI OAuth2 strictly expects "username"
+        formData.append('password', password);
 
-      if (response.ok) {
+        // 2. Send as application/x-www-form-urlencoded
+        const response = await fetch('http://127.0.0.1:8000/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData,
+        });
+
         const data = await response.json();
-        setToken(data.access_token);
+
         setIsLoading(false);
         setClickEffect(false);
-        onLogin(buildSessionUser(data.user));
-        return;
-      }
-      // 401 means "wrong email or password"; anything else means the backend is not usable
-      if (response.status !== 401) backendOffline = true;
-    } catch {
-      // Backend not reachable - fall through to the demo accounts below
-      backendOffline = true;
-    }
 
-    // 2) Demo accounts (mock data, no JWT) keep working exactly as before
-    clearToken();
-    setTimeout(() => {
-      setIsLoading(false);
-      setClickEffect(false);
-      const authResult = authenticateUser(email, password);
-
-      if (authResult.success && authResult.user?.role === 'admin') {
-        // The admin console needs a real backend login. Without one it would
-        // open and immediately return here, so say why instead.
-        setError(
-          backendOffline
-            ? 'The System Administrator account needs the SyncDesk backend, which is not running. Restart "npm run dev" and try again.'
-            : 'The System Administrator account is not set up in the backend yet. In the backend folder run "python seed.py", then try again.'
-        );
-      } else if (authResult.success) {
-        onLogin(authResult.user);
-      } else {
-        setError(
-          backendOffline
-            ? 'The SyncDesk backend is not running, so only the demo accounts can sign in. Restart "npm run dev" and try again.'
-            : authResult.message || 'Authentication failed. Please verify credentials.'
-        );
+        if (response.ok) {
+          // Save the real JWT token to local storage so the session persists
+          localStorage.setItem('syncdesk_token', data.access_token);
+          
+          // Send the real database user profile back to App.jsx
+          onLogin(data.user);
+        } else {
+          // Read the exact error detail sent by FastAPI (e.g., 401 Unauthorized)
+          setError(data.detail || 'Invalid email or password credentials.');
+        }
+      } catch (err) {
+        setIsLoading(false);
+        setClickEffect(false);
+        setError('Server Connection Error: Is your FastAPI backend running on port 8000?');
       }
     }, 600);
   };

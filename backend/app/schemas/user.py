@@ -1,5 +1,6 @@
-import re
-from typing import Literal, Optional
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,8 +13,28 @@ class UserOut(BaseModel):
     # so it can never be serialized even if the ORM object carries it.
     id: int
     name: str
-    email: str
+    
+    # RBAC & Enterprise Roles
     role: str
+    roleLabel: Optional[str] = None
+    department: Optional[str] = None
+    title: Optional[str] = None
+    
+    # Profile & Org Chart (New)
+    avatar: Optional[str] = None
+    bio: Optional[str] = None
+    location: Optional[str] = None
+    skills: Optional[List[str]] = None
+    manager_id: Optional[int] = None
+    
+    # Presence & Localization (New)
+    status: str
+    timezone: str
+    last_active: Optional[datetime] = None
+    
+    # UI Preferences
+    defaultModule: str = "dashboard"
+    dashboardTitle: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -68,5 +89,15 @@ class LoginRequest(BaseModel):
 
 class Token(BaseModel):
     access_token: str
-    token_type: str = "bearer"
-    user: UserOut
+    token_type: str
+    user: UserResponse
+
+# 4. The Request: What React sends to update a profile in the Directory (New)
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    department: Optional[str] = None
+    title: Optional[str] = None
+    manager_id: Optional[int] = None
+    bio: Optional[str] = None
+    location: Optional[str] = None
+    skills: Optional[List[str]] = None
