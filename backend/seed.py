@@ -17,6 +17,9 @@ from app.db.session import SessionLocal, engine
 SEED_USERS = [
     # name,              email,                    role,       password
     ("System Admin",     "admin@syncdesk.com",     "admin",    "admin123"),
+    # Same email and password as the "System Administrator" quick demo button on the
+    # login page, so that button signs in through the backend and opens the admin console.
+    ("System Administrator", "admin@syncdesk.io",  "admin",    "1234"),
     ("Hasan Rahman",     "hr@syncdesk.com",        "hr",       "hr1234"),
     ("Nadia Islam",      "nadia@syncdesk.com",     "employee", "employee123"),
     ("Tanvir Ahmed",     "tanvir@syncdesk.com",    "employee", "employee123"),

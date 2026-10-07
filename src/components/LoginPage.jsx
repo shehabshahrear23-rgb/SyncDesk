@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { 
-  ShieldCheck, 
-  Mail, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  Sun, 
-  Moon, 
-  ArrowRight, 
+import {
+  ShieldCheck,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Sun,
+  Moon,
+  ArrowRight,
   AlertCircle,
   Terminal,
   Activity,
@@ -15,6 +15,45 @@ import {
   Cpu
 } from 'lucide-react';
 import { authenticateUser, userDatabase } from '../data/userDatabase';
+import { setToken, clearToken } from '../utils/auth';
+
+// Display details for accounts that come from the backend (admin / hr / employee)
+const BACKEND_ROLE_DETAILS = {
+  admin: { roleLabel: 'Web Administrator', dashboardTitle: 'Web Administrator Console & Company Directory' },
+  hr: { roleLabel: 'HR Manager', dashboardTitle: 'HR & People Operations Dashboard' },
+  employee: { roleLabel: 'Employee', dashboardTitle: 'My Workspace Dashboard' }
+};
+
+// Letter avatar as an inline SVG, so anything rendering <img src={user.avatar}> still works
+const buildInitialAvatar = (name) => {
+  const initial = (Array.from((name || '').trim())[0] || '?').toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#007aff"/><text x="48" y="50" font-family="Arial, sans-serif" font-size="44" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${initial}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+};
+
+// Give a backend user the same shape the rest of the app expects from userDatabase.
+// If the same email is also a demo account, its photo, name and title are kept,
+// while id, email and role always come from the backend.
+const buildSessionUser = (apiUser) => {
+  const demoProfile = userDatabase.find(
+    (demo) => String(demo?.email ?? '').toLowerCase() === String(apiUser.email ?? '').toLowerCase()
+  );
+  return {
+    ...apiUser,
+    ...(BACKEND_ROLE_DETAILS[apiUser.role] || { roleLabel: apiUser.role }),
+    avatar: buildInitialAvatar(apiUser.name || apiUser.email),
+    ...(demoProfile
+      ? {
+          name: demoProfile.name || apiUser.name,
+          roleLabel: demoProfile.roleLabel || BACKEND_ROLE_DETAILS[apiUser.role]?.roleLabel || apiUser.role,
+          avatar: demoProfile.avatar || buildInitialAvatar(apiUser.name || apiUser.email)
+        }
+      : {}),
+    id: apiUser.id,
+    email: apiUser.email,
+    role: apiUser.role
+  };
+};
 
 const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
   const [email, setEmail] = useState('');
@@ -24,7 +63,7 @@ const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [clickEffect, setClickEffect] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -36,15 +75,53 @@ const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
     setClickEffect(true);
     setIsLoading(true);
 
+    // 1) Real accounts: ask the FastAPI backend for a JWT
+    let backendOffline = false;
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setToken(data.access_token);
+        setIsLoading(false);
+        setClickEffect(false);
+        onLogin(buildSessionUser(data.user));
+        return;
+      }
+      // 401 means "wrong email or password"; anything else means the backend is not usable
+      if (response.status !== 401) backendOffline = true;
+    } catch {
+      // Backend not reachable - fall through to the demo accounts below
+      backendOffline = true;
+    }
+
+    // 2) Demo accounts (mock data, no JWT) keep working exactly as before
+    clearToken();
     setTimeout(() => {
       setIsLoading(false);
       setClickEffect(false);
       const authResult = authenticateUser(email, password);
 
-      if (authResult.success) {
+      if (authResult.success && authResult.user?.role === 'admin') {
+        // The admin console needs a real backend login. Without one it would
+        // open and immediately return here, so say why instead.
+        setError(
+          backendOffline
+            ? 'The System Administrator account needs the SyncDesk backend, which is not running. Restart "npm run dev" and try again.'
+            : 'The System Administrator account is not set up in the backend yet. In the backend folder run "python seed.py", then try again.'
+        );
+      } else if (authResult.success) {
         onLogin(authResult.user);
       } else {
-        setError(authResult.message || 'Authentication failed. Please verify credentials.');
+        setError(
+          backendOffline
+            ? 'The SyncDesk backend is not running, so only the demo accounts can sign in. Restart "npm run dev" and try again.'
+            : authResult.message || 'Authentication failed. Please verify credentials.'
+        );
       }
     }, 600);
   };
@@ -137,7 +214,7 @@ const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
       </div>
 
       {/* Centered Ultra-Executive Portal Card (Firm & Stable Layout) */}
-      <div 
+      <div
         className="cyber-hud-card"
         style={{
           width: '100%',
@@ -205,14 +282,14 @@ const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
 
         {/* Form Inputs */}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          
+
           <div>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '6px', textAlign: 'left' }}>
               Work Email Address
             </label>
             <div style={{ position: 'relative' }}>
               <Mail size={16} color="var(--neon-cyan)" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)' }} />
-              <input 
+              <input
                 type="email"
                 placeholder="name@company.com"
                 value={email}
@@ -235,7 +312,7 @@ const LoginPage = ({ onLogin, theme, onToggleTheme }) => {
             </div>
             <div style={{ position: 'relative' }}>
               <KeyRound size={16} color="var(--neon-cyan)" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)' }} />
-              <input 
+              <input
                 type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 value={password}
