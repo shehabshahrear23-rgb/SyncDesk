@@ -41,7 +41,7 @@ def login(user_credentials: OAuth2PasswordRequestForm = Depends(), db: Session =
     if not user or not verify_password(user_credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password credentials."
+            detail="Incorrect email or password",
         )
     
     # 3. Create the real JWT session token
