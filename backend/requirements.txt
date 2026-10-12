@@ -1,0 +1,12 @@
+﻿fastapi
+uvicorn
+sqlalchemy
+redis
+pydantic[email]
+pydantic-settings
+alembic
+psycopg2-binary
+bcrypt
+PyJWT
+httpx
+python-multipart
