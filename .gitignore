@@ -23,3 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 .env
+node_modules/
+dist/
+.env
+*.bak
+__pycache__/
+*.db
+install-syncdesk-*.mjs
