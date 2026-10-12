@@ -1,4 +1,4 @@
-﻿import { defineConfig } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -7,6 +7,8 @@ import path from 'node:path'
 
 const BACKEND_PORT = 8000
 const BACKEND_DIR = path.resolve(process.cwd(), 'backend')
+
+// Kept on globalThis so a Vite restart (after a config change) reuses the same backend
 const backendState = (globalThis.__syncdeskBackend ??= { child: null, exitHookAdded: false })
 
 const isPortOpen = (port) =>
@@ -18,6 +20,7 @@ const isPortOpen = (port) =>
   })
 
 const findPython = () => {
+  // Prefer the project's virtual environment if there is one
   for (const base of [BACKEND_DIR, process.cwd()]) {
     for (const env of ['venv', '.venv', 'env']) {
       for (const exe of [path.join(base, env, 'Scripts', 'python.exe'), path.join(base, env, 'bin', 'python')]) {
@@ -30,6 +33,7 @@ const findPython = () => {
   )
 }
 
+// `npm run dev` also starts the FastAPI backend, so one command runs the whole app.
 function syncdeskBackend() {
   return {
     name: 'syncdesk-backend',
@@ -37,7 +41,7 @@ function syncdeskBackend() {
     async configureServer(server) {
       const log = (message) => server.config.logger.info(`\x1b[36m[SyncDesk]\x1b[0m ${message}`)
 
-      if (backendState.child) return
+      if (backendState.child) return // already started by this dev server
       if (!existsSync(path.join(BACKEND_DIR, 'app', 'main.py'))) {
         log('No backend/app/main.py found, so the backend was not started.')
         return
@@ -72,6 +76,7 @@ function syncdeskBackend() {
         }
       })
 
+      // Stop the backend whenever the dev server stops (Ctrl+C, closed terminal, quit)
       if (!backendState.exitHookAdded) {
         backendState.exitHookAdded = true
         process.once('exit', () => backendState.child?.kill())
@@ -86,20 +91,23 @@ function syncdeskBackend() {
   }
 }
 
+// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), syncdeskBackend()],
   server: {
     proxy: {
+      // Forward /api/* to the FastAPI server
       '/api': {
         target: `http://127.0.0.1:${BACKEND_PORT}`,
         changeOrigin: true,
         configure: (proxy) => {
+          // If the backend is not answering, tell the app so in a way it can show
           proxy.on('error', (error, request, response) => {
             if (!response || typeof response.writeHead !== 'function' || response.headersSent) return
             response.writeHead(503, { 'Content-Type': 'application/json' })
             response.end(JSON.stringify({
               code: 'backend_offline',
-              detail: 'The SyncDesk backend is not running. Stop "npm run dev" with Ctrl+C and start it again.',
+              detail: 'The SyncDesk backend is not running. Stop "npm run dev" with Ctrl+C and start it again. It starts the backend for you.',
             }))
           })
         },
