@@ -20,11 +20,15 @@ import DocumentManagement from './components/Documents/DocumentManagement';
 
 import { companyHealth, kanbanTasks } from './data/mockData';
 import { clearToken } from './utils/auth';
+import usePresence, { sendStatus } from './hooks/usePresence';
 
 function App() {
   // Authentication & User Session State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+
+  // Heartbeat + away detection (only runs while logged in with a JWT)
+  usePresence(isAuthenticated);
 
   // Theme State ('dark' | 'light')
   const [theme, setTheme] = useState('dark');
@@ -69,6 +73,7 @@ function App() {
   };
 
   const handleLogout = () => {
+    sendStatus('offline', { keepalive: true }); // must go before clearToken(), it needs the JWT
     clearToken();
     setIsAuthenticated(false);
     setCurrentUser(null);

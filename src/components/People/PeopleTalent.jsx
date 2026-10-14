@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { employees } from '../../data/mockData';
-import { Search, Filter, Mail, MapPin, Clock, GitFork, UserCheck, X, Briefcase, Activity, UserPlus } from 'lucide-react';
+import StatusIndicator from '../StatusIndicator';
+import LocalTimeDisplay from '../LocalTimeDisplay';
+import { Search, Filter, Mail, MapPin, GitFork, UserCheck, X, Briefcase, Activity, UserPlus } from 'lucide-react';
 
 const PeopleTalent = ({ onOpenAssignModal, departmentFilter = 'All' }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,9 +84,7 @@ const PeopleTalent = ({ onOpenAssignModal, departmentFilter = 'All' }) => {
                     <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{emp.title}</p>
                   </div>
                 </div>
-                <span className={`status-pill status-${emp.status}`}>
-                  {emp.status}
-                </span>
+                <StatusIndicator status={emp.status} showLabel />
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -96,10 +96,7 @@ const PeopleTalent = ({ onOpenAssignModal, departmentFilter = 'All' }) => {
                   <MapPin size={14} color="var(--neon-green)" />
                   <span>{emp.location}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Clock size={14} color="var(--warning-amber)" />
-                  <span>Local Time: {emp.timeZone}</span>
-                </div>
+                <LocalTimeDisplay timezone={emp.timezone} />
               </div>
             </div>
 
@@ -166,9 +163,7 @@ const PeopleTalent = ({ onOpenAssignModal, departmentFilter = 'All' }) => {
                 <h2 style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-main)' }}>{selectedEmployee.name}</h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{selectedEmployee.title}</p>
                 <div style={{ marginTop: '6px' }}>
-                  <span className={`status-pill status-${selectedEmployee.status}`}>
-                    {selectedEmployee.status}
-                  </span>
+                  <StatusIndicator status={selectedEmployee.status} showLabel />
                 </div>
               </div>
             </div>

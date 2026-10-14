@@ -11,6 +11,10 @@ class User(Base):
     role = Column(String, nullable=False, default="employee") 
     department = Column(String, nullable=True)  # NEW: e.g., "HR", "IT", "Legal"
     hashed_password = Column(String, nullable=False)
+    # Presence (Ticket 2): who is online / away / offline, and where they are in the world
+    status = Column(String, nullable=False, default="offline", server_default=text("'offline'"))  # online | away | offline
+    timezone = Column(String, nullable=False, default="UTC", server_default=text("'UTC'"))  # IANA name, e.g. Asia/Dhaka
+    last_active = Column(DateTime, nullable=True)  # UTC time of the last heartbeat
 
 class Document(Base):
     __tablename__ = "documents"

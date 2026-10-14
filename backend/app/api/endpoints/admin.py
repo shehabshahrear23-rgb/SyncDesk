@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.db import models
 from app.schemas.user import UserCreate, UserOut, UserUpdate
@@ -17,8 +18,30 @@ def get_user_or_404(db: Session, user_id: int) -> models.User:
     return user
 
 @router.get("/users", response_model=List[UserOut])
-def read_users(db: Session = Depends(get_db)):
-    return db.query(models.User).order_by(models.User.name).all()
+def read_users(
+    search: Optional[str] = Query(default=None, max_length=100),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """List users. Optional ?search=text matches the name OR the email
+    (case-insensitive, anywhere in the text). skip/limit page through the result."""
+    query = db.query(models.User)
+
+    term = (search or "").strip()
+    if term:
+        # Treat % and _ typed by the user as plain characters, not LIKE wildcards
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        query = query.filter(
+            or_(
+                models.User.name.ilike(pattern, escape="\\"),
+                models.User.email.ilike(pattern, escape="\\"),
+            )
+        )
+
+    # Sorting by name then id keeps the pages stable between requests
+    return query.order_by(models.User.name, models.User.id).offset(skip).limit(limit).all()
 
 @router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
@@ -33,6 +56,8 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         role=user.role,
         hashed_password=hash_password(user.password),
+        status=user.status,
+        timezone=user.timezone,
     )
     db.add(db_user)
     db.commit()
@@ -59,6 +84,10 @@ def update_user(
         user.name = changes.name
     if changes.role is not None:
         user.role = changes.role
+    if changes.status is not None:
+        user.status = changes.status
+    if changes.timezone is not None:
+        user.timezone = changes.timezone
 
     db.commit()
     db.refresh(user)

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import items, auth, admin, ai, documents
+from app.api.endpoints import items, auth, admin, ai, documents, users
 from app.core.config import settings
 from app.db import models
 from app.db.sample_documents import add_sample_documents_if_empty
@@ -32,6 +32,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
+app.include_router(users.router, prefix="/api/users", tags=["users"])
 
 @app.get("/")
 def root():
