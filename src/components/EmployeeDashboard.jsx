@@ -15,6 +15,9 @@ import {
   Zap
 } from 'lucide-react';
 import { employees, kanbanTasks, documentLibrary } from '../data/mockData';
+import StatusIndicator, { normalizeStatus } from './StatusIndicator';
+import LocalTimeDisplay from './LocalTimeDisplay';
+import { sendStatus } from '../hooks/usePresence';
 
 const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNavigateModule }) => {
   const [currentUserStatus, setCurrentUserStatus] = useState('online');
@@ -56,11 +59,15 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
         gap: '16px'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <img 
-            src={currentEmployee.avatar} 
-            alt={currentEmployee.name} 
-            style={{ width: '56px', height: '56px', borderRadius: '50%', border: '2px solid var(--primary-accent)', objectFit: 'cover' }}
-          />
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            {/* Glowing ring in the status colour: follows the availability switch */}
+            <img 
+              src={currentEmployee.avatar} 
+              alt={currentEmployee.name} 
+              className={`hud-avatar hud--${normalizeStatus(currentUserStatus)}`}
+              style={{ width: '56px', height: '56px', display: 'block', objectFit: 'cover' }}
+            />
+          </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <h2 style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)' }}>
@@ -73,6 +80,11 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
               {currentEmployee.title} • {currentEmployee.department} Department
             </p>
+            <div className={`hud-pod hud--${normalizeStatus(currentUserStatus)}`} style={{ marginTop: '8px' }}>
+              <StatusIndicator status={currentUserStatus} size={8} showLabel calm />
+              <span className="hud-pod-divider" />
+              <LocalTimeDisplay timezone={currentEmployee.timezone} />
+            </div>
           </div>
         </div>
 
@@ -80,21 +92,15 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: 'rgba(0,0,0,0.4)', padding: '10px 16px', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>MY AVAILABILITY STATUS</span>
-            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-              {['online', 'in-meeting', 'away'].map(st => (
+            <div className="hud-switch" style={{ marginTop: '6px' }}>
+              {['online', 'away', 'offline'].map(st => (
                 <button
                   key={st}
-                  onClick={() => setCurrentUserStatus(st)}
-                  style={{
-                    backgroundColor: currentUserStatus === st ? 'var(--primary-accent)' : 'rgba(255,255,255,0.06)',
-                    color: currentUserStatus === st ? '#fff' : 'var(--text-muted)',
-                    border: 'none',
-                    borderRadius: '4px',
-                    padding: '4px 10px',
-                    fontSize: '11px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    textTransform: 'capitalize'
+                  type="button"
+                  className={`hud--${st}${currentUserStatus === st ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setCurrentUserStatus(st);
+                    sendStatus(st); // saves to the backend when logged in with a JWT
                   }}
                 >
                   {st}
