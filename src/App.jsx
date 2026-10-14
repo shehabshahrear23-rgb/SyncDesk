@@ -39,6 +39,8 @@ function App() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assigneeTarget, setAssigneeTarget] = useState(null);
+  // Which board the modal was opened from ('sprint' | 'operation' | null)
+  const [assignCategory, setAssignCategory] = useState(null);
 
   // Security Challenge State
   const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState(false);
@@ -107,8 +109,11 @@ function App() {
     }));
   };
 
-  const handleOpenAssignModal = (employee = null) => {
+  // category is optional: ProjectsOperations passes the active board,
+  // every other caller (Header, Sidebar, dashboards) leaves it out.
+  const handleOpenAssignModal = (employee = null, category = null) => {
     setAssigneeTarget(employee);
+    setAssignCategory(typeof category === 'string' ? category : null);
     setIsAssignModalOpen(true);
   };
 
@@ -135,6 +140,7 @@ function App() {
               onUpdateTaskStatus={handleUpdateTaskStatus}
               onOpenAssignModal={handleOpenAssignModal}
               departmentFilter={departmentFilter}
+              currentUserRole={userRole}
             />
           );
         case 'engineering':
@@ -175,6 +181,7 @@ function App() {
             onUpdateTaskStatus={handleUpdateTaskStatus}
             onOpenAssignModal={handleOpenAssignModal}
             departmentFilter={departmentFilter}
+            currentUserRole={userRole}
           />
         );
       case 'finance':
@@ -256,6 +263,7 @@ function App() {
         onClose={() => setIsAssignModalOpen(false)}
         onAssignTask={handleAssignTask}
         initialAssignee={assigneeTarget}
+        category={assignCategory}
       />
 
       {/* Security Passcode Auth Modal */}

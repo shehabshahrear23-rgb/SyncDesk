@@ -8,11 +8,22 @@ import {
   Users,
   UserPlus,
   ArrowRight,
-  Filter
+  Filter,
+  Inbox
 } from 'lucide-react';
 
-const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, departmentFilter = 'All' }) => {
+// Roles that are NOT allowed to create tasks (frontend role guard for the "New Task" button).
+const STAFF_ROLES = ['engineering', 'staff', 'employee'];
+
+// The two segregated boards. "id" is the category value stored on every task.
+const BOARDS = [
+  { id: 'sprint', label: 'Sprints', emptyMessage: 'No active sprint tasks right now. Create one to get started.' },
+  { id: 'operation', label: 'Operations', emptyMessage: 'No active operations right now. Create one to get started.' },
+];
+
+const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, departmentFilter = 'All', currentUserRole = 'ceo' }) => {
   const [activeView, setActiveView] = useState('kanban'); // 'kanban' | 'resource'
+  const [activeBoard, setActiveBoard] = useState('sprint'); // 'sprint' | 'operation'
   const [filterProject, setFilterProject] = useState('All');
 
   const columns = [
@@ -24,10 +35,23 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
 
   const projectsList = ['All', 'Digital Twin Engine', 'Communication Suite', 'Security Mesh', 'Predictive Analytics', 'Design System'];
 
-  const filteredTasks = tasks.filter(task => {
+  const canCreateTasks = !STAFF_ROLES.includes(currentUserRole);
+  const currentBoard = BOARDS.find(b => b.id === activeBoard);
+
+  // Step 1: only the tasks that belong to the active board
+  const boardTasks = tasks.filter(task => (task.category || 'sprint') === activeBoard);
+
+  // Step 2: the project dropdown filters inside that board
+  const filteredTasks = boardTasks.filter(task => {
     if (filterProject !== 'All' && task.project !== filterProject) return false;
     return true;
   });
+
+  // Open the modal and tell it which board we are on, so it can set the category.
+  const handleNewTask = () => {
+    setFilterProject('All'); // make sure the new card can't be hidden by the project filter
+    onOpenAssignModal(null, activeBoard);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -43,6 +67,28 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          {/* Board Selector (Sprints / Operations) */}
+          <div style={{ display: 'flex', backgroundColor: 'rgba(0,0,0,0.3)', padding: '3px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+            {BOARDS.map(board => (
+              <button
+                key={board.id}
+                onClick={() => setActiveBoard(board.id)}
+                style={{
+                  backgroundColor: activeBoard === board.id ? 'var(--primary-accent)' : 'transparent',
+                  color: activeBoard === board.id ? '#fff' : 'var(--text-muted)',
+                  border: 'none',
+                  padding: '6px 14px',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                {board.label}
+              </button>
+            ))}
+          </div>
+
           {/* Project Filter Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Filter size={14} color="var(--text-muted)" />
@@ -91,19 +137,52 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
             </button>
           </div>
 
-          {/* Work Assignment Modal Trigger */}
-          <button 
-            onClick={onOpenAssignModal}
-            className="btn-primary" 
-            style={{ fontSize: '12px', padding: '6px 14px' }}
-          >
-            <UserPlus size={14} />
-            <span>+ Assign Work to Employee</span>
-          </button>
+          {/* New Task button - hidden for Staff (role guard) */}
+          {canCreateTasks && (
+            <button 
+              onClick={handleNewTask}
+              className="btn-primary" 
+              style={{ fontSize: '12px', padding: '6px 14px' }}
+            >
+              <UserPlus size={14} />
+              <span>+ New Task</span>
+            </button>
+          )}
         </div>
       </div>
 
       {activeView === 'kanban' ? (
+        boardTasks.length === 0 ? (
+          /* Empty State - the active board has no tasks at all */
+          <div className="card-panel glass-panel" style={{
+            minHeight: '320px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '14px',
+            textAlign: 'center',
+            border: '1px dashed var(--border-color)'
+          }}>
+            <Inbox size={36} color="var(--text-dim)" />
+            <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-main)' }}>
+              {currentBoard.label} board is empty
+            </h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', maxWidth: '360px' }}>
+              {currentBoard.emptyMessage}
+            </p>
+            {canCreateTasks && (
+              <button
+                onClick={handleNewTask}
+                className="btn-primary"
+                style={{ fontSize: '12px', padding: '8px 16px' }}
+              >
+                <UserPlus size={14} />
+                <span>+ New Task</span>
+              </button>
+            )}
+          </div>
+        ) : (
         /* Kanban Board View */
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', minHeight: '520px' }}>
           {columns.map(col => {
@@ -226,6 +305,7 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
             );
           })}
         </div>
+        )
       ) : (
         /* Resource Allocation View */
         <div className="card-panel glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>

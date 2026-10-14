@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import { X, UserPlus, CheckCircle, AlertCircle, Calendar, Tag, Briefcase, User } from 'lucide-react';
 import { employees } from '../data/mockData';
 
-const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = null }) => {
+// Board categories. The "id" is what gets saved on the task.
+const CATEGORY_LABELS = {
+  sprint: 'Sprint',
+  operation: 'Operation',
+};
+
+const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = null, category = null }) => {
   const [title, setTitle] = useState('');
   const [project, setProject] = useState('Digital Twin Engine');
   const [assigneeId, setAssigneeId] = useState(initialAssignee ? initialAssignee.id : employees[0].id);
@@ -11,8 +17,14 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
   const [tags, setTags] = useState('Frontend, Core');
   const [description, setDescription] = useState('');
   const [toastMessage, setToastMessage] = useState(null);
+  // Only used when the modal is opened from outside a board (Header / Sidebar buttons)
+  const [chosenCategory, setChosenCategory] = useState('sprint');
 
   if (!isOpen) return null;
+
+  // If a board told us its category, use it (locked). Otherwise use the dropdown value.
+  const isCategoryLocked = Boolean(category);
+  const effectiveCategory = category || chosenCategory;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -24,6 +36,7 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
       id: `task-${Date.now()}`,
       title: title.trim(),
       project,
+      category: effectiveCategory,
       status: 'inProgress',
       priority,
       assignee: assignedEmp.name,
@@ -93,7 +106,7 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
               <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>SyncDesk Executive Work Delegation Engine</p>
             </div>
           </div>
-          <button 
+          <button
             onClick={onClose}
             style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
           >
@@ -128,9 +141,9 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
             <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '6px' }}>
               Work / Task Title *
             </label>
-            <input 
-              type="text" 
-              placeholder="e.g., Optimize Digital Twin WebSocket Latency" 
+            <input
+              type="text"
+              placeholder="e.g., Optimize Digital Twin WebSocket Latency"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -168,8 +181,8 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
                 borderRadius: 'var(--radius-sm)',
                 border: '1px solid var(--border-color)'
               }}>
-                <img 
-                  src={selectedEmployeeObj.avatar} 
+                <img
+                  src={selectedEmployeeObj.avatar}
                   alt={selectedEmployeeObj.name}
                   style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }}
                 />
@@ -178,6 +191,32 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Task Category: locked when opened from a board, dropdown otherwise */}
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '6px' }}>
+              Task Category
+            </label>
+            {isCategoryLocked ? (
+              <div
+                className="input-field"
+                style={{ width: '100%', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: 0.9 }}
+              >
+                <span>{CATEGORY_LABELS[effectiveCategory] || effectiveCategory}</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Set by the active board</span>
+              </div>
+            ) : (
+              <select
+                value={chosenCategory}
+                onChange={(e) => setChosenCategory(e.target.value)}
+                className="input-field"
+                style={{ width: '100%', backgroundColor: 'var(--bg-input)', color: 'var(--text-main)' }}
+              >
+                <option value="sprint">Sprint</option>
+                <option value="operation">Operation</option>
+              </select>
+            )}
           </div>
 
           {/* Grid row: Project & Priority */}
@@ -225,8 +264,8 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
               <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '6px' }}>
                 Target Deadline
               </label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
                 className="input-field"
@@ -238,8 +277,8 @@ const WorkAssignmentModal = ({ isOpen, onClose, onAssignTask, initialAssignee = 
               <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '6px' }}>
                 Tags (comma separated)
               </label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
                 placeholder="e.g. Canvas, API, Urgent"
