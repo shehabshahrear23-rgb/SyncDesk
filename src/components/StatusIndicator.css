@@ -1,0 +1,97 @@
+/* Glowing presence light: green = online, yellow = away, red = offline */
+.presence-light {
+  --light: #ff3d57;
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff 0%, var(--light) 45%, var(--light) 100%);
+  box-shadow: 0 0 6px var(--light), 0 0 14px var(--light);
+}
+.presence-light--online  { --light: #00e676; animation: presence-pulse 2s ease-in-out infinite; }
+.presence-light--away    { --light: #ffc400; animation: presence-breathe 3.2s ease-in-out infinite; }
+.presence-light--offline { --light: #ff3d57; opacity: 0.75; box-shadow: 0 0 4px var(--light), 0 0 8px var(--light); }
+
+/* Online: an expanding ring, like a radar ping */
+.presence-light--online::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid var(--light);
+  animation: presence-ring 2s ease-out infinite;
+}
+
+@keyframes presence-pulse   { 0%, 100% { box-shadow: 0 0 6px var(--light), 0 0 14px var(--light); } 50% { box-shadow: 0 0 10px var(--light), 0 0 24px var(--light); } }
+@keyframes presence-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes presence-ring    { 0% { transform: scale(1); opacity: 0.9; } 100% { transform: scale(2.4); opacity: 0; } }
+
+.presence-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.presence-label--online  { color: #00e676; text-shadow: 0 0 8px rgba(0, 230, 118, 0.6); }
+.presence-label--away    { color: #ffc400; text-shadow: 0 0 8px rgba(255, 196, 0, 0.6); }
+.presence-label--offline { color: #ff3d57; text-shadow: 0 0 8px rgba(255, 61, 87, 0.5); }
+
+@media (prefers-reduced-motion: reduce) {
+  .presence-light, .presence-light::after { animation: none !important; }
+}
+
+/* ---------- HUD style (Staff dashboard banner) ---------- */
+.hud--online  { --light: #00e676; }
+.hud--away    { --light: #ffc400; }
+.hud--offline { --light: #ff3d57; }
+
+/* Calm light: glow only, no pulsing ring */
+.presence-light--calm, .presence-light--calm::after { animation: none !important; }
+.presence-light--calm::after { display: none; }
+
+/* Avatar: a glowing ring in the status colour instead of a dot */
+.hud-avatar {
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #0b0d12, 0 0 0 3px var(--light), 0 0 16px -2px var(--light);
+  transition: box-shadow 0.4s ease;
+}
+
+/* One slim glass chip: light · label | clock */
+.hud-pod {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(0,0,0,0.35));
+  border: 1px solid color-mix(in srgb, var(--light) 45%, transparent);
+  box-shadow: inset 0 0 12px -6px var(--light), 0 0 14px -8px var(--light);
+  backdrop-filter: blur(6px);
+}
+.hud-pod-divider { width: 1px; height: 14px; background: color-mix(in srgb, var(--light) 40%, transparent); }
+
+/* Segmented availability switch */
+.hud-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid var(--border-color);
+}
+.hud-switch button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.hud-switch button:hover { color: var(--light); }
+.hud-switch button.is-active {
+  color: var(--light);
+  background: color-mix(in srgb, var(--light) 14%, transparent);
+  border-color: color-mix(in srgb, var(--light) 55%, transparent);
+  box-shadow: 0 0 12px -3px var(--light), inset 0 0 8px -4px var(--light);
+  text-shadow: 0 0 8px var(--light);
+}
