@@ -27,6 +27,9 @@ SEED_USERS = [
     ("Rafiq Hossain",    "rafiq@syncdesk.com",     "employee", "employee123"),
 ]
 
+# Everyone in the demo team is in Dhaka; change a user's timezone later with the admin API.
+DEFAULT_TIMEZONE = "Asia/Dhaka"
+
 def seed():
     models.Base.metadata.create_all(bind=engine)
     db = SessionLocal()
@@ -42,6 +45,7 @@ def seed():
                 email=email,
                 role=role,
                 hashed_password=hash_password(password),
+                timezone=DEFAULT_TIMEZONE,
             ))
             created += 1
             print(f"create  {email}  role={role}  password={password}")

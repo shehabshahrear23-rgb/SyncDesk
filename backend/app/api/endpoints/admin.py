@@ -33,6 +33,8 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         role=user.role,
         hashed_password=hash_password(user.password),
+        status=user.status,
+        timezone=user.timezone,
     )
     db.add(db_user)
     db.commit()
@@ -59,6 +61,10 @@ def update_user(
         user.name = changes.name
     if changes.role is not None:
         user.role = changes.role
+    if changes.status is not None:
+        user.status = changes.status
+    if changes.timezone is not None:
+        user.timezone = changes.timezone
 
     db.commit()
     db.refresh(user)
