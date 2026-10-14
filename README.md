@@ -1,4 +1,4 @@
-# 🌐 SyncDesk
+﻿# 🌐 SyncDesk
 
 > **Enterprise Workspace Portal & Digital Command Center**
 
@@ -49,13 +49,13 @@ Follow these instructions to run the project locally.
 
 Open a terminal and navigate to the backend directory:
 
-\`\`\`bash
+```bash
 cd backend
-\`\`\`
+```
 
 Create and activate a virtual environment:
 
-\`\`\`bash
+```bash
 # On Windows
 python -m venv .venv
 .venv\Scripts\activate
@@ -63,34 +63,34 @@ python -m venv .venv
 # On macOS/Linux
 python3 -m venv .venv
 source .venv/bin/activate
-\`\`\`
+```
 
 Install dependencies:
 
-\`\`\`bash
+```bash
 pip install -r requirements.txt
-\`\`\`
+```
 
 Run the FastAPI server:
 
-\`\`\`bash
+```bash
 uvicorn app.main:app --reload
-\`\`\`
+```
 *The API will be available at `http://localhost:8000`. You can view the Swagger documentation at `http://localhost:8000/docs`.*
 
 ### 2. Frontend Setup
 
 Open a new terminal window and navigate to the project root:
 
-\`\`\`bash
+```bash
 npm install
-\`\`\`
+```
 
 Start the Vite development server:
 
-\`\`\`bash
+```bash
 npm run dev
-\`\`\`
+```
 *The frontend will be available at `http://localhost:5173`.*
 
 ---
