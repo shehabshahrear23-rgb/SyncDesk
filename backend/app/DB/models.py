@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Date, Integer, JSON, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Integer, JSON, String, text
 from app.db.session import Base
 
 class Item(Base):
@@ -16,6 +16,10 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     role = Column(String, nullable=False, default="employee")  # admin | hr | employee
     hashed_password = Column(String, nullable=False)
+    # Presence (Ticket 2): who is online / away / offline, and where they are in the world
+    status = Column(String, nullable=False, default="offline", server_default=text("'offline'"))  # online | away | offline
+    timezone = Column(String, nullable=False, default="UTC", server_default=text("'UTC'"))  # IANA name, e.g. Asia/Dhaka
+    last_active = Column(DateTime, nullable=True)  # UTC time of the last heartbeat
 
 class Document(Base):
     __tablename__ = "documents"
