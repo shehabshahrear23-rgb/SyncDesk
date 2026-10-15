@@ -10,3 +10,4 @@ bcrypt
 PyJWT
 httpx
 python-multipart
+websockets
