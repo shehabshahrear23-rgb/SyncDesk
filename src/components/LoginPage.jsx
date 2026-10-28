@@ -17,10 +17,13 @@ import {
 import { authenticateUser, userDatabase } from '../data/userDatabase';
 import { setToken, clearToken } from '../utils/auth';
 
-// Display details for accounts that come from the backend (admin / hr / employee)
+// Display details for accounts that come from the backend.
 const BACKEND_ROLE_DETAILS = {
+  ceo: { roleLabel: 'Chief Executive Officer', dashboardTitle: 'Executive Command Center' },
   admin: { roleLabel: 'Web Administrator', dashboardTitle: 'Web Administrator Console & Company Directory' },
   hr: { roleLabel: 'HR Manager', dashboardTitle: 'HR & People Operations Dashboard' },
+  team_lead: { roleLabel: 'Team Lead', dashboardTitle: 'Team Lead Work Dashboard' },
+  project_manager: { roleLabel: 'Project Manager', dashboardTitle: 'Project Manager Work Dashboard' },
   employee: { roleLabel: 'Employee', dashboardTitle: 'My Workspace Dashboard' }
 };
 
@@ -41,12 +44,14 @@ const buildSessionUser = (apiUser) => {
   return {
     ...apiUser,
     ...(BACKEND_ROLE_DETAILS[apiUser.role] || { roleLabel: apiUser.role }),
-    avatar: buildInitialAvatar(apiUser.name || apiUser.email),
+    avatar: apiUser.avatar_url || buildInitialAvatar(apiUser.name || apiUser.email),
     ...(demoProfile
       ? {
           name: demoProfile.name || apiUser.name,
           roleLabel: demoProfile.roleLabel || BACKEND_ROLE_DETAILS[apiUser.role]?.roleLabel || apiUser.role,
-          avatar: demoProfile.avatar || buildInitialAvatar(apiUser.name || apiUser.email)
+          title: demoProfile.title,
+          department: demoProfile.department,
+          avatar: apiUser.avatar_url || demoProfile.avatar || buildInitialAvatar(apiUser.name || apiUser.email)
         }
       : {}),
     id: apiUser.id,

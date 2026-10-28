@@ -14,12 +14,12 @@ import {
   Send,
   Zap
 } from 'lucide-react';
-import { employees, kanbanTasks, documentLibrary } from '../data/mockData';
+import { employees } from '../data/mockData';
 import StatusIndicator, { normalizeStatus } from './StatusIndicator';
 import LocalTimeDisplay from './LocalTimeDisplay';
 import { sendStatus } from '../hooks/usePresence';
 
-const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNavigateModule }) => {
+const EmployeeDashboard = ({ tasks, taskPerformance, updatingTaskIds = new Set(), onUpdateTaskStatus, onEndTask, onOpenAssignModal, onNavigateModule, currentUser }) => {
   const [currentUserStatus, setCurrentUserStatus] = useState('online');
   const [statusNote, setStatusNote] = useState('Optimizing Digital Twin graph render speeds');
   const [selectedTask, setSelectedTask] = useState(null);
@@ -30,10 +30,27 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
   ]);
 
   // Current logged in employee (Marcus Vance as staff view example)
-  const currentEmployee = employees[1]; // Marcus Vance - VP of Engineering / Staff member
+  const currentEmployee = currentUser
+    ? { ...employees[1], ...currentUser, avatar: currentUser.avatar_url || currentUser.avatar || employees[1].avatar }
+    : employees[1]; // Marcus Vance - VP of Engineering / Staff member
 
   // Filter tasks assigned to this employee or general staff assigned tasks
-  const myAssignedTasks = tasks.filter(t => t.assignee === currentEmployee.name || t.assignee === "Marcus Vance" || t.assignee === "Alex Chen");
+  const myAssignedTasks = tasks.filter((task) =>
+    currentUser?.id !== undefined
+    && String(task.assigneeId) === String(currentUser.id)
+    && !['ended', 'expired'].includes(task.status)
+  );
+  const activeAssignedTasks = myAssignedTasks;
+  const successfulTasks = taskPerformance?.successful ?? 0;
+  const expiredTasks = taskPerformance?.expired ?? 0;
+  const completionRate = taskPerformance?.completion_rate ?? 0;
+  const formatDeadline = (value) => {
+    if (!value) return '—';
+    const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
+    return Number.isNaN(dateValue.getTime())
+      ? value
+      : dateValue.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  };
 
   const handleAddWorkLog = (e) => {
     e.preventDefault();
@@ -111,6 +128,24 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
         </div>
       </div>
 
+      <div className="card-panel glass-panel" aria-label="Successful task completion percentage">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+          <div>
+            <h3 style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-main)' }}>Successful Task Completion</h3>
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Approved tasks you ended, compared with ended and expired tasks.</p>
+          </div>
+          <strong style={{ fontSize: '22px', color: 'var(--neon-green)' }}>{completionRate}%</strong>
+        </div>
+        <div role="progressbar" aria-valuenow={completionRate} aria-valuemin={0} aria-valuemax={100} aria-label={`${completionRate}% successful task completion`} style={{ width: '100%', height: '8px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '5px', overflow: 'hidden' }}>
+          <div style={{ width: `${completionRate}%`, height: '100%', backgroundColor: 'var(--neon-green)', transition: 'width 0.3s' }} />
+        </div>
+        <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
+          {(taskPerformance?.total ?? 0) > 0
+            ? `${successfulTasks} successful • ${expiredTasks} expired`
+            : 'No tasks have ended yet.'}
+        </p>
+      </div>
+
       {/* Main Grid: My Assigned Tasks vs Work Log & Quick Shortcuts */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
         
@@ -129,7 +164,7 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
               padding: '4px 12px',
               borderRadius: '12px'
             }}>
-              {myAssignedTasks.length} Active Assignments
+              {activeAssignedTasks.length} Active Assignments
             </span>
           </div>
 
@@ -154,11 +189,11 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
                       {task.project}
                     </span>
                     <span className={`status-pill status-${task.status === 'done' ? 'online' : 'in-meeting'}`}>
-                      {task.status}
+                      {task.status === 'inProgress' ? 'In Progress' : task.status === 'review' ? 'In Review' : task.status}
                     </span>
                   </div>
                   <span style={{ fontSize: '11px', color: 'var(--warning-amber)', fontWeight: '600' }}>
-                    Due: {task.dueDate}
+                    Due: {formatDeadline(task.dueDate)}
                   </span>
                 </div>
 
@@ -192,15 +227,39 @@ const EmployeeDashboard = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, onNav
                     ))}
                   </div>
 
-                  {task.status !== 'done' && (
+                  {['backlog', 'inProgress'].includes(task.status) && (
                     <button
                       onClick={() => onUpdateTaskStatus(task.id)}
+                      disabled={updatingTaskIds.has(task.id)}
                       className="btn-primary"
-                      style={{ padding: '4px 12px', fontSize: '11px' }}
+                      style={{ padding: '4px 12px', fontSize: '11px', opacity: updatingTaskIds.has(task.id) ? 0.6 : 1 }}
                     >
                       <CheckCircle2 size={12} />
-                      <span>Advance Status</span>
+                      <span>{updatingTaskIds.has(task.id) ? 'Saving...' : 'Advance Status'}</span>
                     </button>
+                  )}
+                  {task.status === 'review' && (
+                    <span style={{ fontSize: '11px', color: 'var(--warning-amber)' }}>Waiting for the assigner to review</span>
+                  )}
+                  {task.status === 'done' && (
+                    <button
+                      onClick={() => onEndTask(task.id)}
+                      disabled={updatingTaskIds.has(task.id)}
+                      className="btn-primary"
+                      style={{ padding: '4px 12px', fontSize: '11px', opacity: updatingTaskIds.has(task.id) ? 0.6 : 1 }}
+                    >
+                      {updatingTaskIds.has(task.id) ? 'Saving...' : 'End Task'}
+                    </button>
+                  )}
+                  {task.history?.length > 0 && (
+                    <div style={{ width: '100%', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
+                      <p style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '4px' }}>Task history</p>
+                      {task.history.map((entry) => (
+                        <p key={entry.id} style={{ fontSize: '10px', color: 'var(--text-muted)', margin: '3px 0' }}>
+                          {new Date(entry.created_at).toLocaleString()} — {entry.actor_name}: {entry.note || entry.event_type}
+                        </p>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>

@@ -25,6 +25,13 @@ SEED_USERS = [
     ("Tanvir Ahmed",     "tanvir@syncdesk.com",    "employee", "employee123"),
     ("Sara Chowdhury",   "sara@syncdesk.com",      "employee", "employee123"),
     ("Rafiq Hossain",    "rafiq@syncdesk.com",     "employee", "employee123"),
+    # These are the demo assignees shown in the task assignment UI.
+    ("Elena Rostova",    "e.rostova@syncdesk.io", "employee", "employee123"),
+    ("Marcus Vance",     "m.vance@syncdesk.io",   "employee", "employee123"),
+    ("Sophia Lin",       "s.lin@syncdesk.io",     "employee", "employee123"),
+    ("David Kim",        "d.kim@syncdesk.io",     "employee", "employee123"),
+    ("Priya Sharma",     "p.sharma@syncdesk.io",  "employee", "employee123"),
+    ("Alex Chen",        "a.chen@syncdesk.io",    "employee", "employee123"),
 ]
 
 # Everyone in the demo team is in Dhaka; change a user's timezone later with the admin API.
@@ -40,12 +47,18 @@ def seed():
             if exists:
                 print(f"skip    {email} (already exists)")
                 continue
-            db.add(models.User(
+            user = models.User(
                 name=name,
                 email=email,
                 role=role,
                 hashed_password=hash_password(password),
                 timezone=DEFAULT_TIMEZONE,
+            )
+            db.add(user)
+            db.flush()
+            db.add(models.Notification(
+                user_id=user.id,
+                message=f"Welcome to SyncDesk, {user.name}! Your {user.role} account is ready. We're glad to have you on the team.",
             ))
             created += 1
             print(f"create  {email}  role={role}  password={password}")
