@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Bell, Sparkles, Command, Clock, UserPlus, Sun, Moon, LogOut, Sliders, Zap } from 'lucide-react';
+import { canAssignTasks } from '../utils/taskAccess';
 
 const Header = ({ 
   activeTabTitle, 
@@ -141,7 +142,7 @@ const Header = ({
         </button>
 
         {/* Assign Task Button for Executive View */}
-        {roleMode === 'ceo' && (
+        {canAssignTasks(roleMode) && (
           <button
             onClick={() => onOpenAssignModal(null)}
             className="btn-primary"
@@ -204,6 +205,9 @@ const Header = ({
         {/* Notifications Icon */}
         <button 
           onClick={onToggleNotifications}
+          type="button"
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+          aria-haspopup="dialog"
           style={{
             position: 'relative',
             backgroundColor: 'var(--bg-card)',
@@ -222,14 +226,23 @@ const Header = ({
           {unreadCount > 0 && (
             <span style={{
               position: 'absolute',
-              top: '4px',
-              right: '4px',
-              width: '8px',
-              height: '8px',
+              top: '-5px',
+              right: '-5px',
+              minWidth: '16px',
+              height: '16px',
+              padding: '0 4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               backgroundColor: 'var(--primary-accent)',
-              borderRadius: '50%',
-              boxShadow: '0 0 6px var(--primary-accent)'
-            }} />
+              borderRadius: '10px',
+              boxShadow: '0 0 6px var(--primary-accent)',
+              color: '#fff',
+              fontSize: '9px',
+              fontWeight: '700'
+            }}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
           )}
         </button>
 

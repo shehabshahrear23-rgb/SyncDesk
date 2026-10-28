@@ -19,9 +19,10 @@ import {
   DollarSign,
   UserPlus
 } from 'lucide-react';
-import { aiInsights, companyHealth, financialData, employees } from '../data/mockData';
+import { aiInsights, companyHealth, financialData } from '../data/mockData';
 import * as companyData from '../data/mockData';
 import { getToken } from '../utils/auth';
+import { canAssignTasks } from '../utils/taskAccess';
 
 // Real AI models served by the backend (Groq). The key never reaches the browser.
 const AI_MODELS = [
@@ -172,7 +173,6 @@ const AIAssistantModal = ({
   onClose, 
   onNavigateModule, 
   onOpenAssignModal,
-  onAssignTask,
   tasks,
   currentUser
 }) => {
@@ -187,7 +187,7 @@ const AIAssistantModal = ({
       sender: 'ai',
       model: BUILT_IN_LABEL,
       local: true,
-      text: "Hello! I am your SyncDesk AI Assistant. I know your company's people, tasks, projects and finances, and I can also answer general questions like ChatGPT or Gemini.\n\nTo give work to someone, start your message with **Assign task to** and their name.",
+      text: "Hello! I am your SyncDesk AI Assistant. I know your company's people, tasks, projects and finances, and I can also answer general questions.",
       timestamp: 'Just now'
     }
   ]);
@@ -229,7 +229,9 @@ const AIAssistantModal = ({
     { label: "🏢 Company Overview", query: "Give me a short overview of our company: the team, the projects, and how we are doing." },
     { label: "📊 Loss or Benefit Analysis", query: "Show me our financial loss and benefit analysis using the company's finance data." },
     { label: "📋 Open Tasks", query: "Which tasks are not finished yet, who owns each one, and which is most urgent?" },
-    { label: "⚡ Assign Task to Marcus Vance", query: "Assign work to Marcus Vance: Optimize database query latency." }
+    ...(canAssignTasks(currentUser?.role)
+      ? [{ label: "⚡ Assign a Task", action: 'assign' }]
+      : [])
   ];
 
   const handleCopy = (id, text) => {
@@ -252,12 +254,46 @@ const AIAssistantModal = ({
   };
 
   // 1. Check for Work Assignment intent
-  const checkWorkAssignmentIntent = (query) => {
+  const checkWorkAssignmentIntent = async (query) => {
     const lower = query.toLowerCase();
     if (lower.includes("assign") || lower.includes("delegate") || lower.includes("give task") || lower.includes("create task")) {
-      // Find candidate employee
-      let matchedEmp = employees.find(e => lower.includes(e.name.toLowerCase()) || lower.includes(e.name.split(' ')[0].toLowerCase())) || employees[1]; // default Marcus Vance
-      
+      if (!canAssignTasks(currentUser?.role)) {
+        return { text: 'Your account role cannot assign tasks.', isError: true };
+      }
+      const token = getToken();
+      if (!token) {
+        return { text: 'Sign in with a backend account before assigning tasks.', isError: true };
+      }
+
+      let eligibleUsers;
+      try {
+        const response = await fetch('/api/tasks/assignees', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(typeof data?.detail === 'string' ? data.detail : `Could not load eligible users (${response.status}).`);
+        }
+        if (!Array.isArray(data)) throw new Error('Unexpected eligible-user response.');
+        eligibleUsers = data;
+      } catch (error) {
+        return {
+          text: error instanceof Error ? error.message : 'Could not load eligible users.',
+          isError: true
+        };
+      }
+
+      const matchedUsers = eligibleUsers
+        .filter((user) => lower.includes(user.name.toLowerCase()))
+        .sort((a, b) => b.name.length - a.name.length);
+      const matchedEmp = matchedUsers[0];
+      if (!matchedEmp) {
+        return {
+          text: 'I could not match a name in that request to an eligible account. Use the Assign Task form to select an eligible user.',
+          isError: true
+        };
+      }
+
       // Extract title from prompt
       let title = "Optimize system performance & sprint deliverable";
       if (query.includes(":")) {
@@ -267,27 +303,10 @@ const AIAssistantModal = ({
         if (parts[1] && parts[1].trim()) title = parts[1].trim();
       }
 
-      const newTask = {
-        id: `task-${Date.now()}`,
-        title: title,
-        project: "Digital Twin Engine",
-        status: "inProgress",
-        priority: "High",
-        assignee: matchedEmp.name,
-        assigneeAvatar: matchedEmp.avatar,
-        progress: 20,
-        dueDate: "Oct 15, 2026",
-        tags: ["AI Delegated", "Sprint"],
-        description: `Work task assigned via AI Assistant prompt: "${query}"`
-      };
-
-      if (onAssignTask) {
-        onAssignTask(newTask);
-      }
-
+      onOpenAssignModal({ id: matchedEmp.id, name: matchedEmp.name }, 'sprint', title);
+      onClose();
       return {
-        text: `### ✅ Work Task Successfully Assigned!\n\n* **Task Title**: "${newTask.title}"\n* **Assigned Employee**: **${matchedEmp.name}** (${matchedEmp.title})\n* **Department**: ${matchedEmp.department}\n* **Project Scope**: ${newTask.project}\n* **Priority Level**: High\n* **Status**: In Progress (Dispatched to Kanban Board)\n\nThe task has been added live to the Sprint Operations Kanban board.`,
-        action: { label: "View Task on Sprint Kanban Board", action: () => { onClose(); onNavigateModule('projects'); } }
+        text: `The assignment form is ready for **${matchedEmp.name}** with the title prefilled. Confirm the deadline and submit it to create the task.`,
       };
     }
     return null;
@@ -396,8 +415,8 @@ const AIAssistantModal = ({
     const fromQuickPrompt = textToSend !== null;
     const isAssignCommand = /^\s*(assign|delegate|give task|create task)\b/i.test(queryText);
 
-    // Step A: Work assignment (quick button, or a message that starts with "Assign ...")
-    const assignmentResponse = (fromQuickPrompt || isAssignCommand) ? checkWorkAssignmentIntent(queryText) : null;
+    // Handle a direct task-assignment command before sending it to the AI.
+    const assignmentResponse = (fromQuickPrompt || isAssignCommand) ? await checkWorkAssignmentIntent(queryText) : null;
     if (assignmentResponse) {
       setTimeout(() => {
         setMessages(prev => [...prev, {
@@ -405,6 +424,7 @@ const AIAssistantModal = ({
           sender: 'ai',
           model: BUILT_IN_LABEL,
           text: assignmentResponse.text,
+          isError: assignmentResponse.isError,
           action: assignmentResponse.action,
           timestamp: timeNow()
         }]);
@@ -508,7 +528,11 @@ const AIAssistantModal = ({
                   {statusBadge.label}
                 </span>
               </div>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Knows Your Company • Ask Anything • Assign Tasks</p>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                {canAssignTasks(currentUser?.role)
+                  ? 'Knows Your Company • Ask Anything • Assign Tasks'
+                  : 'Knows Your Company • Ask Anything'}
+              </p>
             </div>
           </div>
 
@@ -575,7 +599,14 @@ const AIAssistantModal = ({
           {quickPrompts.map((p, idx) => (
             <button
               key={idx}
-              onClick={() => handleSend(p.query)}
+              onClick={() => {
+                if (p.action === 'assign') {
+                  onClose();
+                  onOpenAssignModal(null);
+                  return;
+                }
+                handleSend(p.query);
+              }}
               style={{
                 backgroundColor: 'var(--bg-card)',
                 border: '1px solid var(--border-color)',

@@ -26,8 +26,11 @@ const DOCUMENTS_ENDPOINT = '/api/documents';
 const AI_STATUS_ENDPOINT = '/api/ai/status';
 
 const ROLES = [
+  { key: 'ceo', label: 'CEO', plural: 'CEOs', color: '#f59e0b' },
   { key: 'admin', label: 'Admin', plural: 'Admins', color: '#a855f7' },
   { key: 'hr', label: 'HR', plural: 'HR', color: 'var(--neon-cyan)' },
+  { key: 'team_lead', label: 'Team Lead', plural: 'Team Leads', color: 'var(--primary-accent)' },
+  { key: 'project_manager', label: 'Project Manager', plural: 'Project Managers', color: '#ec4899' },
   { key: 'employee', label: 'Employee', plural: 'Employees', color: 'var(--neon-green)' }
 ];
 const ALL_ROLES = 'all';
@@ -186,7 +189,7 @@ const AdminDashboard = ({ onUnauthorized, onNavigateModule }) => {
         };
         const [meData, documentData, aiData] = await Promise.all([
           optional(ME_ENDPOINT, { headers: authHeaders }),
-          optional(DOCUMENTS_ENDPOINT),
+          optional(DOCUMENTS_ENDPOINT, { headers: authHeaders }),
           optional(AI_STATUS_ENDPOINT)
         ]);
         setMe(meData && meData.id !== undefined ? meData : null);
@@ -211,7 +214,7 @@ const AdminDashboard = ({ onUnauthorized, onNavigateModule }) => {
   // ---- Derived numbers (all computed from the loaded data) ----
 
   const roleCounts = useMemo(() => {
-    const counts = { admin: 0, hr: 0, employee: 0, other: 0 };
+    const counts = Object.fromEntries([...ROLES.map(({ key }) => [key, 0]), ['other', 0]]);
     users.forEach((user) => {
       const key = String(user?.role ?? '').toLowerCase();
       if (key in counts && key !== 'other') counts[key] += 1;
@@ -339,7 +342,7 @@ const AdminDashboard = ({ onUnauthorized, onNavigateModule }) => {
       const created = await response.json();
       setUsers(prev => [...prev, created].sort((a, b) => String(a?.name ?? '').localeCompare(String(b?.name ?? ''))));
       setIsAddOpen(false);
-      setNotice(`Account created for ${created.name} (${created.email}).`);
+      setNotice(`Account created for ${created.name} (${created.email}). Share the temporary password securely; a welcome notification is waiting in their dashboard.`);
     });
   };
 
@@ -507,7 +510,7 @@ const AdminDashboard = ({ onUnauthorized, onNavigateModule }) => {
             <StatTile
               label="Total Accounts"
               value={users.length}
-              detail={`${roleCounts.admin} admin • ${roleCounts.hr} HR • ${roleCounts.employee} employee`}
+              detail={`${roleCounts.ceo} CEO • ${roleCounts.admin} admin • ${roleCounts.hr} HR • ${roleCounts.team_lead + roleCounts.project_manager} leads/PMs • ${roleCounts.employee} employees`}
               icon={<Users size={18} />}
               tint={{ background: 'rgba(0, 122, 255, 0.12)', color: 'var(--primary-accent)' }}
             />

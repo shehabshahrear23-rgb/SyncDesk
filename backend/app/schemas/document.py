@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 class DocumentOut(BaseModel):
     id: int
@@ -12,8 +12,34 @@ class DocumentOut(BaseModel):
     file_size: str
     author: Optional[str] = None
     starred: bool = False
+    owner_id: Optional[int] = None
+    is_sample: bool = False
+    storage_name: Optional[str] = Field(default=None, exclude=True)
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def has_file(self) -> bool:
+        return bool(getattr(self, "storage_name", None))
+
+
+class DocumentUserOut(BaseModel):
+    id: int
+    name: str
+    email: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentAccessUpdate(BaseModel):
+    user_ids: List[int] = Field(max_length=500)
+
+    @field_validator("user_ids")
+    @classmethod
+    def remove_duplicate_users(cls, user_ids: List[int]) -> List[int]:
+        return list(dict.fromkeys(user_ids))
+
 
 class DocumentCreate(BaseModel):
     """What the Upload Document form sends. The upload date is set by the server."""

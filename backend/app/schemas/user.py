@@ -1,9 +1,10 @@
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal, Optional
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, computed_field, model_validator
+from app.services.profile_pictures import profile_picture_url
 
-Role = Literal["admin", "hr", "employee"]
+Role = Literal["ceo", "admin", "hr", "team_lead", "project_manager", "employee"]
 Status = Literal["online", "away", "offline"]
 
 def _bytes_ok(value: str) -> str:
@@ -23,6 +24,7 @@ Email = Annotated[str, Field(min_length=3, max_length=120), AfterValidator(_ok(r
 Timezone = Annotated[str, AfterValidator(_ok(r"^(UTC|[A-Za-z]+(/[A-Za-z0-9_+\-]+){1,2})$", "Timezone must be an IANA name such as Asia/Dhaka or UTC"))]
 
 Password = Annotated[str, Field(min_length=8, max_length=72), AfterValidator(_bytes_ok)]
+CurrentPassword = Annotated[str, Field(min_length=1, max_length=72), AfterValidator(_bytes_ok)]
 
 class UserOut(BaseModel):  # hashed_password is not listed, so it can never leave the API
     id: int
@@ -34,6 +36,11 @@ class UserOut(BaseModel):  # hashed_password is not listed, so it can never leav
     last_active: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def avatar_url(self) -> str:
+        return profile_picture_url(self.id)
     
     @model_validator(mode="after")
     def offline_if_stale(self):  # no heartbeat for 150 s (2.5 x 60 s) means offline
@@ -75,6 +82,17 @@ class StatusUpdate(BaseModel):  # body of PUT /api/users/me/status (the heartbea
 class ProfileUpdate(BaseModel):  # what a user may change about themselves (no role)
     name: Optional[Name] = None
     timezone: Optional[Timezone] = None
+
+class ChangePasswordRequest(BaseModel):
+    current_password: CurrentPassword
+    new_password: Password
+    confirm_new_password: Password
+
+    @model_validator(mode="after")
+    def new_passwords_must_match(self):
+        if self.new_password != self.confirm_new_password:
+            raise ValueError("New passwords do not match")
+        return self
 
 class LoginRequest(BaseModel):
     email: str

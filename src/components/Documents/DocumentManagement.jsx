@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { documentLibrary } from '../../data/mockData';
-import { FileText, Star, Search, Filter, Download, ExternalLink, Briefcase, Eye, X, RefreshCw, AlertCircle, Upload, CheckCircle } from 'lucide-react';
+import { FileText, Star, Search, Download, Briefcase, Eye, X, RefreshCw, AlertCircle, Upload, CheckCircle, Share2, Users } from 'lucide-react';
 import MetadataBadge from '../MetadataBadge';
+import { getToken } from '../../utils/auth';
 
 const DOCUMENTS_ENDPOINT = '/api/documents';
 const ALL_TAB = 'All';
@@ -11,7 +11,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const ALLOWED_EXTENSIONS = ['pdf', 'txt', 'doc', 'docx'];
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
 const MAX_TAGS = 8;
-const EMPTY_FORM = { file: null, title: '', category: '', tags: '', author: '' };
+const EMPTY_FORM = { file: null, title: '', category: '', tags: '' };
+const EMPTY_SHARE = { document: null, users: [], selectedIds: [] };
+const DOCUMENT_REFRESH_INTERVAL_MS = 30_000;
 
 const cleanText = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -30,11 +32,6 @@ const parseTags = (text) => {
     if (tag && !tags.some(existing => existing.toLowerCase() === tag.toLowerCase())) tags.push(tag);
   });
   return tags;
-};
-
-const todayISO = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 };
 
 // "2026-10-01" -> "Oct 01, 2026". Any other text (e.g. "Aug 02, 2026") is shown as it is.
@@ -64,11 +61,14 @@ const normalizeDocument = (doc, index) => {
     uploadDate: formatDate(doc?.upload_date ?? doc?.modified),
     fileSize: cleanText(doc?.file_size ?? doc?.size),
     author: cleanText(doc?.author),
-    starred: Boolean(doc?.starred)
+    starred: Boolean(doc?.starred),
+    ownerId: doc?.owner_id ?? null,
+    isSample: Boolean(doc?.is_sample),
+    hasFile: Boolean(doc?.has_file)
   };
 };
 
-const DocumentManagement = () => {
+const DocumentManagement = ({ currentUser }) => {
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState('all'); // 'all' | 'starred'
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -76,7 +76,8 @@ const DocumentManagement = () => {
 
   // Raw documents exactly as received. Never modified after loading.
   const [documents, setDocuments] = useState([]);
-  const [loadState, setLoadState] = useState('loading'); // 'loading' | 'ready' | 'offline'
+  const [loadState, setLoadState] = useState(() => getToken() ? 'loading' : 'offline'); // 'loading' | 'ready' | 'offline'
+  const [loadError, setLoadError] = useState(() => getToken() ? '' : 'Sign in with a backend account to view and upload documents.');
 
   // Upload Document form
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -84,35 +85,91 @@ const DocumentManagement = () => {
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState(null); // { type: 'success' | 'warning', text }
+  const [shareState, setShareState] = useState(EMPTY_SHARE);
+  const [shareError, setShareError] = useState('');
+  const [isLoadingShare, setIsLoadingShare] = useState(false);
+  const [isSavingShare, setIsSavingShare] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(null);
+  const [togglingStarIds, setTogglingStarIds] = useState(() => new Set());
 
   // Load all documents once. Tabs and search then filter in the browser, with no more requests.
   useEffect(() => {
     const controller = new AbortController();
 
     const loadDocuments = async () => {
+      const token = getToken();
+      if (!token) return undefined;
       try {
-        const response = await fetch(DOCUMENTS_ENDPOINT, { signal: controller.signal });
-        if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+        const response = await fetch(DOCUMENTS_ENDPOINT, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          const error = await response.json().catch(() => null);
+          throw new Error(error?.detail || `Server responded with ${response.status}`);
+        }
         const data = await response.json();
         if (!Array.isArray(data)) throw new Error('Unexpected response');
         setDocuments(data);
         setLoadState('ready');
       } catch (err) {
         if (err.name === 'AbortError') return; // component closed while loading
-        // Backend not reachable: keep the vault usable with the built-in sample documents
-        setDocuments(documentLibrary);
+        setDocuments([]);
+        setLoadError(err instanceof Error ? err.message : 'Could not load documents.');
         setLoadState('offline');
       }
     };
 
     loadDocuments();
-    return () => controller.abort();
+    const intervalId = window.setInterval(loadDocuments, DOCUMENT_REFRESH_INTERVAL_MS);
+    window.addEventListener('focus', loadDocuments);
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', loadDocuments);
+    };
   }, []);
 
   const normalizedDocs = useMemo(
     () => (Array.isArray(documents) ? documents : []).map(normalizeDocument),
     [documents]
   );
+
+  const toggleStar = async (doc) => {
+    const token = getToken();
+    if (!token) {
+      setNotice({ type: 'warning', text: 'Sign in with a backend account to star documents.' });
+      return;
+    }
+    if (togglingStarIds.has(doc.id)) return;
+
+    setTogglingStarIds((current) => new Set(current).add(doc.id));
+    try {
+      const response = await fetch(`${DOCUMENTS_ENDPOINT}/${doc.id}/star`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.detail === 'string' ? data.detail : 'Could not update this star.');
+      }
+
+      setDocuments((current) => current.map((document) => (
+        document.id === data.id ? { ...document, starred: data.starred } : document
+      )));
+      setPreviewDoc((current) => (
+        current?.id === data.id ? { ...current, starred: data.starred } : current
+      ));
+    } catch (error) {
+      setNotice({ type: 'warning', text: error instanceof Error ? error.message : 'Could not update this star.' });
+    } finally {
+      setTogglingStarIds((current) => {
+        const next = new Set(current);
+        next.delete(doc.id);
+        return next;
+      });
+    }
+  };
 
   // "All" + every distinct category found in the data (no duplicates, A-Z)
   const categoryTabs = useMemo(() => {
@@ -197,7 +254,10 @@ const DocumentManagement = () => {
 
   // Put a newly saved document at the top and reset the filters so it is visible
   const showNewDocument = (newDocument, message) => {
-    setDocuments(prev => [newDocument, ...(Array.isArray(prev) ? prev : [])]);
+    setDocuments(prev => [
+      newDocument,
+      ...(Array.isArray(prev) ? prev.filter((document) => !document?.is_sample) : [])
+    ]);
     setActiveTab(ALL_TAB);
     setSearch('');
     setFilterMode('all');
@@ -218,44 +278,133 @@ const DocumentManagement = () => {
     if (!category) { setFormError('Please enter a category.'); return; }
     if (tags.length > MAX_TAGS) { setFormError(`Please use at most ${MAX_TAGS} tags.`); return; }
 
-    const payload = {
-      title,
-      category,
-      linked_context: tags,
-      file_size: formatFileSize(form.file.size),
-      author: form.author.trim() || null,
-      starred: false
-    };
-
-    // Kept only in this page when the backend cannot be reached
-    const saveLocally = () => showNewDocument(
-      { ...payload, id: `local-${Date.now()}`, upload_date: todayISO() },
-      { type: 'warning', text: `"${title}" was added, but the document server is not reachable, so it will disappear when the page is refreshed.` }
-    );
+    const token = getToken();
+    if (!token) {
+      setFormError('Sign in with a backend account to upload documents.');
+      return;
+    }
+    const payload = new FormData();
+    payload.append('file', form.file);
+    payload.append('title', title);
+    payload.append('category', category);
+    payload.append('linked_context', tags.join(', '));
 
     setFormError('');
     setIsSaving(true);
     try {
       const response = await fetch(DOCUMENTS_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: { Authorization: `Bearer ${token}` },
+        body: payload
       });
       const data = await response.json().catch(() => null);
 
       if (response.ok && data && data.id !== undefined) {
-        showNewDocument(data, { type: 'success', text: `"${data.title}" was added to the Document Vault.` });
-      } else if (data?.code === 'backend_offline' || (response.status >= 500 && typeof data?.detail !== 'string')) {
-        saveLocally();
+        showNewDocument(data, { type: 'success', text: `"${data.title}" was uploaded. Only you can see it until you grant access.` });
       } else if (typeof data?.detail === 'string') {
         setFormError(data.detail);
+      } else if (Array.isArray(data?.detail) && data.detail[0]?.msg) {
+        setFormError(String(data.detail[0].msg).replace(/^Value error, /, ''));
       } else {
         setFormError('The document could not be saved. Please check the form and try again.');
       }
-    } catch {
-      saveLocally();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Could not reach the document server. Try again.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const openShare = async (document) => {
+    const token = getToken();
+    if (!token) {
+      setShareError('Sign in with a backend account to manage document access.');
+      return;
+    }
+    setShareState({ document, users: [], selectedIds: [] });
+    setShareError('');
+    setIsLoadingShare(true);
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [usersResponse, accessResponse] = await Promise.all([
+        fetch(`${DOCUMENTS_ENDPOINT}/users`, { headers }),
+        fetch(`${DOCUMENTS_ENDPOINT}/${document.id}/access`, { headers })
+      ]);
+      const usersData = await usersResponse.json().catch(() => null);
+      const accessData = await accessResponse.json().catch(() => null);
+      if (!usersResponse.ok || !accessResponse.ok) {
+        const detail = usersData?.detail || accessData?.detail;
+        throw new Error(typeof detail === 'string' ? detail : 'Could not load document access settings.');
+      }
+      setShareState({
+        document,
+        users: Array.isArray(usersData) ? usersData : [],
+        selectedIds: Array.isArray(accessData) ? accessData.map((user) => user.id) : []
+      });
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not load document access settings.');
+    } finally {
+      setIsLoadingShare(false);
+    }
+  };
+
+  const saveShare = async (event) => {
+    event.preventDefault();
+    if (!shareState.document || isSavingShare) return;
+    const token = getToken();
+    if (!token) {
+      setShareError('Sign in with a backend account to manage document access.');
+      return;
+    }
+    setIsSavingShare(true);
+    setShareError('');
+    try {
+      const response = await fetch(`${DOCUMENTS_ENDPOINT}/${shareState.document.id}/access`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ user_ids: shareState.selectedIds })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.detail === 'string' ? data.detail : 'Could not save document access.');
+      }
+      setShareState(EMPTY_SHARE);
+      setNotice({ type: 'success', text: `Access saved for "${shareState.document.title}". Newly granted users will receive a notification.` });
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not save document access.');
+    } finally {
+      setIsSavingShare(false);
+    }
+  };
+
+  const downloadDocument = async (doc) => {
+    const token = getToken();
+    if (!token) {
+      setNotice({ type: 'warning', text: 'Sign in with a backend account to download documents.' });
+      return;
+    }
+    setIsDownloading(doc.id);
+    try {
+      const response = await fetch(`${DOCUMENTS_ENDPOINT}/${doc.id}/download`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(typeof data?.detail === 'string' ? data.detail : 'Could not download this document.');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = window.document.createElement('a');
+      link.href = url;
+      link.download = doc.title;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setNotice({ type: 'warning', text: error instanceof Error ? error.message : 'Could not download this document.' });
+    } finally {
+      setIsDownloading(null);
     }
   };
 
@@ -354,8 +503,9 @@ const DocumentManagement = () => {
           <button
             type="button"
             onClick={openUpload}
+            disabled={!getToken()}
             className="btn-primary"
-            style={{ fontSize: '12px', padding: '6px 14px' }}
+            style={{ fontSize: '12px', padding: '6px 14px', opacity: getToken() ? 1 : 0.5 }}
           >
             <Upload size={14} />
             <span>Upload Document</span>
@@ -375,7 +525,7 @@ const DocumentManagement = () => {
       {loadState === 'offline' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--warning-amber)' }}>
           <AlertCircle size={14} style={{ flexShrink: 0 }} />
-          <span>Could not reach the document server, so the built-in sample documents are shown.</span>
+          <span>{loadError || 'Could not load documents from the server.'}</span>
         </div>
       )}
 
@@ -417,7 +567,17 @@ const DocumentManagement = () => {
                   }}>
                     <FileText size={22} />
                   </div>
-                  <Star size={18} color={doc.starred ? 'var(--warning-amber)' : 'var(--text-dim)'} fill={doc.starred ? 'var(--warning-amber)' : 'none'} />
+                  <button
+                    type="button"
+                    onClick={() => toggleStar(doc)}
+                    disabled={togglingStarIds.has(doc.id)}
+                    aria-label={doc.starred ? `Remove ${doc.title} from starred documents` : `Add ${doc.title} to starred documents`}
+                    aria-pressed={doc.starred}
+                    title={doc.starred ? 'Remove from starred documents' : 'Add to starred documents'}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', border: 'none', background: 'transparent', cursor: togglingStarIds.has(doc.id) ? 'wait' : 'pointer' }}
+                  >
+                    <Star size={18} color={doc.starred ? 'var(--warning-amber)' : 'var(--text-dim)'} fill={doc.starred ? 'var(--warning-amber)' : 'none'} />
+                  </button>
                 </div>
 
                 <h3 style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-main)', lineHeight: '1.4', marginBottom: '8px', overflowWrap: 'anywhere' }}>
@@ -462,6 +622,29 @@ const DocumentManagement = () => {
                 <span>{[doc.fileSize, doc.uploadDate].filter(Boolean).join(' • ')}</span>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
+                  {doc.hasFile && (
+                    <button
+                      type="button"
+                      onClick={() => downloadDocument(doc)}
+                      className="btn-secondary"
+                      disabled={isDownloading === doc.id}
+                      style={{ fontSize: '11px', padding: '4px 8px' }}
+                      aria-label={`Download ${doc.title}`}
+                    >
+                      <Download size={12} /> {isDownloading === doc.id ? 'Downloading...' : 'Download'}
+                    </button>
+                  )}
+                  {doc.ownerId !== null && doc.ownerId === Number(currentUser?.id) && (
+                    <button
+                      type="button"
+                      onClick={() => openShare(doc)}
+                      className="btn-secondary"
+                      style={{ fontSize: '11px', padding: '4px 8px' }}
+                      aria-label={`Manage access to ${doc.title}`}
+                    >
+                      <Share2 size={12} /> Access
+                    </button>
+                  )}
                   <button
                     onClick={() => setPreviewDoc(doc)}
                     className="btn-secondary"
@@ -512,17 +695,131 @@ const DocumentManagement = () => {
 
             <div style={{ backgroundColor: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '20px', fontSize: '13px', color: 'var(--text-muted)', minHeight: '180px' }}>
               <p style={{ color: 'var(--text-main)', fontWeight: '600', marginBottom: '8px' }}>Executive Summary & Metadata</p>
-              <p>This document is cryptographically verified and integrated with the SyncDesk context layer for project <strong>{previewDoc.linkedContext.join(', ') || 'General'}</strong>.</p>
+              <p>{previewDoc.hasFile ? 'This file is stored privately and is available only to its uploader and users granted access.' : 'This is a sample document entry; no downloadable file is attached.'} Context: <strong>{previewDoc.linkedContext.join(', ') || 'General'}</strong>.</p>
               <p style={{ marginTop: '12px' }}>Author: {previewDoc.author || 'Unknown'} | Last Modified: {previewDoc.uploadDate || 'Unknown'}</p>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button className="btn-secondary" onClick={() => setPreviewDoc(null)}>Close</button>
-              <button className="btn-primary">
-                <Download size={14} /> Download Package
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => toggleStar(previewDoc)}
+                disabled={togglingStarIds.has(previewDoc.id)}
+                aria-pressed={previewDoc.starred}
+              >
+                <Star size={14} fill={previewDoc.starred ? 'currentColor' : 'none'} />
+                {previewDoc.starred ? 'Unstar' : 'Star'}
               </button>
+              {previewDoc.hasFile && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => downloadDocument(previewDoc)}
+                  disabled={isDownloading === previewDoc.id}
+                >
+                  <Download size={14} /> {isDownloading === previewDoc.id ? 'Downloading...' : 'Download'}
+                </button>
+              )}
             </div>
           </div>
+        </div>
+      )}
+
+      {shareState.document && (
+        <div
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSavingShare && !isLoadingShare) {
+              setShareState(EMPTY_SHARE);
+              setShareError('');
+            }
+          }}
+          style={{ position: 'fixed', inset: 0, zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', backgroundColor: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)' }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-label="Manage document access"
+            onSubmit={saveShare}
+            style={{ width: '480px', maxWidth: '100%', maxHeight: '85vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', padding: '24px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color-highlight)', borderRadius: 'var(--radius-lg)', boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-main)' }}>Manage document access</h2>
+                <p style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>{shareState.document.title}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShareState(EMPTY_SHARE); setShareError(''); }}
+                disabled={isSavingShare || isLoadingShare}
+                aria-label="Close access settings"
+                style={{ display: 'flex', padding: '4px', border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              Only you and the users selected here can view or download this document. Newly granted users receive an in-app notification.
+            </p>
+
+            {shareError && (
+              <p role="alert" style={{ padding: '9px 11px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(255, 59, 48, 0.12)', color: 'var(--danger-red)', fontSize: '12px' }}>
+                {shareError}
+              </p>
+            )}
+
+            {isLoadingShare ? (
+              <p role="status" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                <RefreshCw size={14} /> Loading users...
+              </p>
+            ) : shareState.users.length === 0 ? (
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No other user accounts are available.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '42vh', overflowY: 'auto' }}>
+                {shareState.users.map((user) => {
+                  const checked = shareState.selectedIds.includes(user.id);
+                  return (
+                    <label
+                      key={user.id}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 10px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: isSavingShare ? 'wait' : 'pointer' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={isSavingShare}
+                        onChange={() => setShareState((current) => ({
+                          ...current,
+                          selectedIds: checked
+                            ? current.selectedIds.filter((id) => id !== user.id)
+                            : [...current.selectedIds, user.id]
+                        }))}
+                      />
+                      <Users size={14} color="var(--primary-accent)" />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-main)' }}>{user.name}</span>
+                        <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>{user.email}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { setShareState(EMPTY_SHARE); setShareError(''); }}
+                disabled={isSavingShare || isLoadingShare}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary" disabled={isSavingShare || isLoadingShare}>
+                <Share2 size={13} /> {isSavingShare ? 'Saving...' : 'Save access'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -591,7 +888,7 @@ const DocumentManagement = () => {
               <p style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '6px' }}>
                 {form.file
                   ? `${form.file.name} • ${formatFileSize(form.file.size)}`
-                  : 'The file name and size are recorded. The file itself is not stored yet.'}
+                  : 'The document will be stored privately and only you can see it until you grant access.'}
               </p>
             </div>
 
@@ -643,20 +940,6 @@ const DocumentManagement = () => {
                   {formTags.map(tag => <MetadataBadge key={tag} label={tag} type="linked-context" />)}
                 </div>
               )}
-            </div>
-
-            <div>
-              <label htmlFor="upload-author" style={labelStyle}>Author (optional)</label>
-              <input
-                id="upload-author"
-                type="text"
-                value={form.author}
-                maxLength={80}
-                onChange={updateField('author')}
-                placeholder="Who wrote this document?"
-                className="input-field"
-                style={{ width: '100%' }}
-              />
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>

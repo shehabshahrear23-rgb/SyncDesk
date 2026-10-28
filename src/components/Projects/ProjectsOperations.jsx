@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { resourceAllocation } from '../../data/mockData';
+import { canAssignTasks, canUpdateTask } from '../../utils/taskAccess';
 import { 
   Kanban, 
   BarChart3, 
@@ -12,19 +13,27 @@ import {
   Inbox
 } from 'lucide-react';
 
-// Roles that are NOT allowed to create tasks (frontend role guard for the "New Task" button).
-const STAFF_ROLES = ['engineering', 'staff', 'employee'];
-
 // The two segregated boards. "id" is the category value stored on every task.
 const BOARDS = [
   { id: 'sprint', label: 'Sprints', emptyMessage: 'No active sprint tasks right now. Create one to get started.' },
   { id: 'operation', label: 'Operations', emptyMessage: 'No active operations right now. Create one to get started.' },
 ];
 
-const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, departmentFilter = 'All', currentUserRole = 'ceo' }) => {
+const ProjectsOperations = ({
+  tasks,
+  updatingTaskIds = new Set(),
+  onUpdateTaskStatus,
+  onReviewTask,
+  onEndTask,
+  onOpenAssignModal,
+  departmentFilter = 'All',
+  currentUserRole = 'ceo',
+  currentUserId
+}) => {
   const [activeView, setActiveView] = useState('kanban'); // 'kanban' | 'resource'
   const [activeBoard, setActiveBoard] = useState('sprint'); // 'sprint' | 'operation'
   const [filterProject, setFilterProject] = useState('All');
+  const [reviewNotes, setReviewNotes] = useState({});
 
   const columns = [
     { id: 'backlog', title: 'Backlog', color: 'var(--text-muted)' },
@@ -33,13 +42,16 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
     { id: 'done', title: 'Done / Completed', color: 'var(--neon-green)' },
   ];
 
-  const projectsList = ['All', 'Digital Twin Engine', 'Communication Suite', 'Security Mesh', 'Predictive Analytics', 'Design System'];
+  const projectsList = ['All', 'Sprint', 'Operations', 'Digital Twin Engine', 'Communication Suite', 'Security Mesh', 'Predictive Analytics', 'Design System'];
 
-  const canCreateTasks = !STAFF_ROLES.includes(currentUserRole);
+  const canCreateTasks = canAssignTasks(currentUserRole);
   const currentBoard = BOARDS.find(b => b.id === activeBoard);
 
   // Step 1: only the tasks that belong to the active board
-  const boardTasks = tasks.filter(task => (task.category || 'sprint') === activeBoard);
+  const boardTasks = tasks.filter(task =>
+    !['ended', 'expired'].includes(task.status)
+    && (task.category || 'sprint') === activeBoard
+  );
 
   // Step 2: the project dropdown filters inside that board
   const filteredTasks = boardTasks.filter(task => {
@@ -184,7 +196,7 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
           </div>
         ) : (
         /* Kanban Board View */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', minHeight: '520px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(210px, 1fr))', gap: '16px', minHeight: '520px', overflowX: 'auto' }}>
           {columns.map(col => {
             const colTasks = filteredTasks.filter(t => t.status === col.id);
             return (
@@ -254,6 +266,48 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
                         </div>
                       </div>
 
+                      {task.history?.length > 0 && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', borderLeft: '2px solid var(--border-color)', paddingLeft: '8px' }}>
+                          {task.history.slice(-2).map((entry) => (
+                            <p key={entry.id} style={{ margin: '3px 0' }}>
+                              {entry.actor_name}: {entry.note || entry.event_type}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+
+                      {task.status === 'review' && String(task.assigned_by_id) === String(currentUserId) && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <textarea
+                            rows={2}
+                            maxLength={2000}
+                            value={reviewNotes[task.id] || ''}
+                            onChange={(event) => setReviewNotes((current) => ({ ...current, [task.id]: event.target.value }))}
+                            placeholder="Add a note when returning the task."
+                            aria-label={`Review note for ${task.title}`}
+                            className="input-field"
+                            style={{ width: '100%', resize: 'vertical', fontSize: '11px' }}
+                          />
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                            <button
+                              onClick={() => onReviewTask(task.id, 'return', reviewNotes[task.id] || '')}
+                              disabled={updatingTaskIds.has(task.id) || !reviewNotes[task.id]?.trim()}
+                              style={{ background: 'transparent', border: '1px solid var(--warning-amber)', color: 'var(--warning-amber)', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '11px' }}
+                            >
+                              Return to backlog
+                            </button>
+                            <button
+                              onClick={() => onReviewTask(task.id, 'approve')}
+                              disabled={updatingTaskIds.has(task.id)}
+                              className="btn-primary"
+                              style={{ padding: '4px 8px', fontSize: '11px' }}
+                            >
+                              Approve
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Assignee & Action */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border-color)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -261,9 +315,10 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>{task.assignee}</span>
                         </div>
 
-                        {task.status !== 'done' && (
+                        {['backlog', 'inProgress'].includes(task.status) && canUpdateTask(task, currentUserId) && (
                           <button
                             onClick={() => onUpdateTaskStatus(task.id)}
+                            disabled={updatingTaskIds.has(task.id)}
                             title="Advance Task Status"
                             style={{
                               background: 'rgba(0, 122, 255, 0.15)',
@@ -271,7 +326,8 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
                               color: 'var(--primary-accent)',
                               borderRadius: '4px',
                               padding: '3px 8px',
-                              cursor: 'pointer',
+                              cursor: updatingTaskIds.has(task.id) ? 'wait' : 'pointer',
+                              opacity: updatingTaskIds.has(task.id) ? 0.6 : 1,
                               display: 'flex',
                               alignItems: 'center',
                               gap: '4px',
@@ -279,8 +335,18 @@ const ProjectsOperations = ({ tasks, onUpdateTaskStatus, onOpenAssignModal, depa
                               fontWeight: '600'
                             }}
                           >
-                            <span>Advance</span>
+                            <span>{updatingTaskIds.has(task.id) ? 'Saving...' : 'Advance'}</span>
                             <ArrowRight size={10} />
+                          </button>
+                        )}
+                        {task.status === 'done' && canUpdateTask(task, currentUserId) && (
+                          <button
+                            onClick={() => onEndTask(task.id)}
+                            disabled={updatingTaskIds.has(task.id)}
+                            className="btn-primary"
+                            style={{ padding: '4px 8px', fontSize: '11px' }}
+                          >
+                            {updatingTaskIds.has(task.id) ? 'Saving...' : 'End Task'}
                           </button>
                         )}
                       </div>
