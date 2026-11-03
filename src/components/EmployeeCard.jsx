@@ -1,5 +1,7 @@
 import React from 'react';
-import { Mail } from 'lucide-react';
+import { Mail, Settings } from 'lucide-react';
+import StatusIndicator from './StatusIndicator';
+import LocalTimeDisplay from './LocalTimeDisplay';
 
 // One colour per role. Anything unexpected falls back to a neutral badge.
 const ROLE_STYLES = {
@@ -12,7 +14,8 @@ const FALLBACK_ROLE_STYLE = { color: 'var(--text-muted)', background: 'var(--bg-
 
 const cleanText = (value) => (typeof value === 'string' ? value.trim() : '');
 
-const EmployeeCard = ({ user }) => {
+// onManage is optional: when given, the card shows a small "Manage" button.
+const EmployeeCard = ({ user, onManage }) => {
   const name = cleanText(user?.name);
   const email = cleanText(user?.email);
   const roleKey = cleanText(user?.role).toLowerCase();
@@ -29,25 +32,29 @@ const EmployeeCard = ({ user }) => {
       className="card-panel card-panel-hover"
       style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}
     >
-      {/* Avatar */}
-      <div
-        aria-hidden="true"
-        style={{
-          width: '48px',
-          height: '48px',
-          flexShrink: 0,
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: roleStyle.background,
-          border: `1px solid ${roleStyle.color}`,
-          color: roleStyle.color,
-          fontSize: '18px',
-          fontWeight: '800'
-        }}
-      >
-        {initial}
+      {/* Avatar, with the glowing presence light on its corner */}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <div
+          aria-hidden="true"
+          style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: roleStyle.background,
+            border: `1px solid ${roleStyle.color}`,
+            color: roleStyle.color,
+            fontSize: '18px',
+            fontWeight: '800'
+          }}
+        >
+          {initial}
+        </div>
+        <span style={{ position: 'absolute', right: '-2px', bottom: '-2px', display: 'flex' }}>
+          <StatusIndicator status={user?.status} size={12} />
+        </span>
       </div>
 
       {/* Name, email, role */}
@@ -106,7 +113,26 @@ const EmployeeCard = ({ user }) => {
         >
           {roleLabel}
         </span>
+
+        {/* Presence + local time (Ticket 2) */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px 14px', marginTop: '10px' }}>
+          <StatusIndicator status={user?.status} showLabel />
+          <LocalTimeDisplay timezone={user?.timezone} />
+        </div>
       </div>
+
+      {onManage && (
+        <button
+          type="button"
+          onClick={() => onManage(user)}
+          className="btn-secondary"
+          aria-label={`Manage ${name || email || 'user'}`}
+          style={{ fontSize: '11px', padding: '6px 10px', flexShrink: 0 }}
+        >
+          <Settings size={13} />
+          <span>Manage</span>
+        </button>
+      )}
     </div>
   );
 };

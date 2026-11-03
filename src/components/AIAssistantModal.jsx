@@ -11,10 +11,18 @@ import {
   Copy, 
   Check, 
   Sliders, 
-  Trash2
+  Trash2, 
+  CheckCircle,
+  TrendingUp,
+  ShieldAlert,
+  Users,
+  DollarSign,
+  UserPlus
 } from 'lucide-react';
-import { employees } from '../data/mockData';
+import { aiInsights, companyHealth, financialData } from '../data/mockData';
 import * as companyData from '../data/mockData';
+import { getToken } from '../utils/auth';
+import { canAssignTasks } from '../utils/taskAccess';
 
 // Real AI models served by the backend (Groq). The key never reaches the browser.
 const AI_MODELS = [
@@ -27,6 +35,8 @@ const modelLabel = (id) => AI_MODELS.find(m => m.id === id)?.label || id;
 const timeNow = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 // --- Company knowledge: turn the app's data into compact text the AI can read ---
+// Everything exported from data/mockData.js is included automatically, so new
+// data added there is known to the AI without touching this file.
 const HIDDEN_KEYS = new Set(['id', 'avatar', 'assigneeAvatar', 'icon', 'x', 'y', 'reactions', 'connections', 'unread']);
 const SECTION_ORDER = ['employees', 'kanbanTasks', 'financialData', 'companyHealth', 'aiInsights', 'quickStats', 'resourceAllocation'];
 const SECTION_TITLES = {
@@ -81,7 +91,7 @@ const formatSection = (name, value) => {
 
 const buildCompanyContext = (tasks, currentUser) => {
   const data = { ...companyData };
-  if (Array.isArray(tasks)) data.kanbanTasks = tasks; 
+  if (Array.isArray(tasks)) data.kanbanTasks = tasks; // live board, including newly assigned tasks
 
   const names = [
     ...SECTION_ORDER.filter(name => name in data),
@@ -97,14 +107,14 @@ const buildCompanyContext = (tasks, currentUser) => {
     const value = data[name];
     if (!value || typeof value !== 'object') continue;
     const section = formatSection(name, value);
-    if (length + section.length > MAX_COMPANY_CONTEXT) continue; 
+    if (length + section.length > MAX_COMPANY_CONTEXT) continue; // keep the request small enough for the free plan
     parts.push(section);
     length += section.length;
   }
   return parts.join('\n\n');
 };
 
-// --- Small, safe Markdown renderer ---
+// --- Small, safe Markdown renderer (headings, bullets, bold, inline code, code blocks) ---
 const renderInline = (text) =>
   text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part, i) => {
     if (/^`[^`\n]+`$/.test(part)) {
@@ -123,6 +133,7 @@ const MarkdownText = ({ text }) => {
   return (
     <div style={{ overflowWrap: 'anywhere' }}>
       {segments.map((segment, index) => {
+        // Odd segments sit between ``` fences: show them as a code block
         if (index % 2 === 1) {
           const code = segment.replace(/^[^\n]*\n/, '').replace(/\n$/, '');
           return (
@@ -161,12 +172,12 @@ const AIAssistantModal = ({
   isOpen, 
   onClose, 
   onNavigateModule, 
-  onAssignTask,
+  onOpenAssignModal,
   tasks,
   currentUser
 }) => {
   const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id);
-  const [aiStatus, setAiStatus] = useState('checking'); 
+  const [aiStatus, setAiStatus] = useState('checking'); // checking | connected | no-key | offline
   const [selectedTone, setSelectedTone] = useState('Executive');
   const [copiedId, setCopiedId] = useState(null);
 
@@ -176,7 +187,7 @@ const AIAssistantModal = ({
       sender: 'ai',
       model: BUILT_IN_LABEL,
       local: true,
-      text: "Hello! I am your SyncDesk AI Assistant. I know your company's people, tasks, projects and finances, and I can also answer general questions like ChatGPT or Gemini.\n\nTo give work to someone, start your message with **Assign task to** and their name.",
+      text: "Hello! I am your SyncDesk AI Assistant. I know your company's people, tasks, projects and finances, and I can also answer general questions.",
       timestamp: 'Just now'
     }
   ]);
@@ -193,12 +204,12 @@ const AIAssistantModal = ({
     scrollToBottom();
   }, [messages, isTyping]);
 
-  // Use developing folder's FastAPI URL
+  // When the assistant opens, ask the backend whether the AI key is set up
   useEffect(() => {
     if (!isOpen) return;
     const controller = new AbortController();
     setAiStatus('checking');
-    fetch('[http://127.0.0.1:8000/api/ai/status](http://127.0.0.1:8000/api/ai/status)', { signal: controller.signal })
+    fetch('/api/ai/status', { signal: controller.signal })
       .then(response => (response.ok ? response.json() : Promise.reject(new Error('offline'))))
       .then(data => setAiStatus(data.configured === true ? 'connected' : data.configured === false ? 'no-key' : 'offline'))
       .catch(err => { if (err.name !== 'AbortError') setAiStatus('offline'); });
@@ -218,7 +229,9 @@ const AIAssistantModal = ({
     { label: "🏢 Company Overview", query: "Give me a short overview of our company: the team, the projects, and how we are doing." },
     { label: "📊 Loss or Benefit Analysis", query: "Show me our financial loss and benefit analysis using the company's finance data." },
     { label: "📋 Open Tasks", query: "Which tasks are not finished yet, who owns each one, and which is most urgent?" },
-    { label: "⚡ Assign Task to Marcus Vance", query: "Assign work to Marcus Vance: Optimize database query latency." }
+    ...(canAssignTasks(currentUser?.role)
+      ? [{ label: "⚡ Assign a Task", action: 'assign' }]
+      : [])
   ];
 
   const handleCopy = (id, text) => {
@@ -240,11 +253,48 @@ const AIAssistantModal = ({
     ]);
   };
 
-  const checkWorkAssignmentIntent = (query) => {
+  // 1. Check for Work Assignment intent
+  const checkWorkAssignmentIntent = async (query) => {
     const lower = query.toLowerCase();
     if (lower.includes("assign") || lower.includes("delegate") || lower.includes("give task") || lower.includes("create task")) {
-      let matchedEmp = employees.find(e => lower.includes(e.name.toLowerCase()) || lower.includes(e.name.split(' ')[0].toLowerCase())) || employees[1]; 
-      
+      if (!canAssignTasks(currentUser?.role)) {
+        return { text: 'Your account role cannot assign tasks.', isError: true };
+      }
+      const token = getToken();
+      if (!token) {
+        return { text: 'Sign in with a backend account before assigning tasks.', isError: true };
+      }
+
+      let eligibleUsers;
+      try {
+        const response = await fetch('/api/tasks/assignees', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(typeof data?.detail === 'string' ? data.detail : `Could not load eligible users (${response.status}).`);
+        }
+        if (!Array.isArray(data)) throw new Error('Unexpected eligible-user response.');
+        eligibleUsers = data;
+      } catch (error) {
+        return {
+          text: error instanceof Error ? error.message : 'Could not load eligible users.',
+          isError: true
+        };
+      }
+
+      const matchedUsers = eligibleUsers
+        .filter((user) => lower.includes(user.name.toLowerCase()))
+        .sort((a, b) => b.name.length - a.name.length);
+      const matchedEmp = matchedUsers[0];
+      if (!matchedEmp) {
+        return {
+          text: 'I could not match a name in that request to an eligible account. Use the Assign Task form to select an eligible user.',
+          isError: true
+        };
+      }
+
+      // Extract title from prompt
       let title = "Optimize system performance & sprint deliverable";
       if (query.includes(":")) {
         title = query.split(":")[1].trim();
@@ -253,32 +303,20 @@ const AIAssistantModal = ({
         if (parts[1] && parts[1].trim()) title = parts[1].trim();
       }
 
-      const newTask = {
-        id: `task-${Date.now()}`,
-        title: title,
-        project: "Digital Twin Engine",
-        status: "inProgress",
-        priority: "High",
-        assignee: matchedEmp.name,
-        assigneeAvatar: matchedEmp.avatar,
-        progress: 20,
-        dueDate: "Oct 15, 2026",
-        tags: ["AI Delegated", "Sprint"],
-        description: `Work task assigned via AI Assistant prompt: "${query}"`
-      };
-
-      if (onAssignTask) onAssignTask(newTask);
-
+      onOpenAssignModal({ id: matchedEmp.id, name: matchedEmp.name }, 'sprint', title);
+      onClose();
       return {
-        text: `### ✅ Work Task Successfully Assigned!\n\n* **Task Title**: "${newTask.title}"\n* **Assigned Employee**: **${matchedEmp.name}** (${matchedEmp.title})\n* **Department**: ${matchedEmp.department}\n* **Project Scope**: ${newTask.project}\n* **Priority Level**: High\n* **Status**: In Progress (Dispatched to Kanban Board)\n\nThe task has been added live to the Sprint Operations Kanban board.`,
-        action: { label: "View Task on Sprint Kanban Board", action: () => { onClose(); onNavigateModule('projects'); } }
+        text: `The assignment form is ready for **${matchedEmp.name}** with the title prefilled. Confirm the deadline and submit it to create the task.`,
       };
     }
     return null;
   };
 
+  // 3. Real AI answer from our own backend (POST /api/ai/chat/stream -> Groq).
+  //    The answer arrives piece by piece, like ChatGPT typing. onText gets the text so far.
   const fetchAIResponse = async (history, onText) => {
     const controller = new AbortController();
+    // Give up if nothing new arrives for 60 seconds
     let idleTimer = setTimeout(() => controller.abort(), 60000);
     const resetIdleTimer = () => {
       clearTimeout(idleTimer);
@@ -289,14 +327,11 @@ const AIAssistantModal = ({
     let model = modelLabel(selectedModel);
 
     try {
-      // Use developing folder's token approach
-      const token = localStorage.getItem('syncdesk_token');
-      
-      const response = await fetch('[http://127.0.0.1:8000/api/ai/chat/stream](http://127.0.0.1:8000/api/ai/chat/stream)', {
+      const response = await fetch('/api/ai/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
+          ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {})
         },
         body: JSON.stringify({
           messages: history,
@@ -315,12 +350,12 @@ const AIAssistantModal = ({
           return { text: data.detail, isError: true };
         }
         if (response.status === 404) {
-          return { text: 'The backend is running an old version that has no AI chat. Please check your FastAPI router configurations.', isError: true };
+          return { text: 'The backend is running an old version that has no AI chat. Stop "npm run dev" with Ctrl+C, close any other backend window, and start it again.', isError: true };
         }
         if (response.status === 422) {
           return { text: 'That message could not be sent. Clear the chat with the bin icon and try again.', isError: true };
         }
-        return { text: `The backend hit an error while answering (code ${response.status}).`, isError: true };
+        return { text: `The backend hit an error while answering (code ${response.status}). The terminal running "npm run dev" shows the reason.`, isError: true };
       }
 
       setAiStatus('connected');
@@ -353,7 +388,7 @@ const AIAssistantModal = ({
         return { text: 'The AI took too long to answer. Please try again.', isError: true };
       }
       setAiStatus('offline');
-      return { text: 'The connection to the app server was lost. Check that your FastAPI backend is running.', isError: true };
+      return { text: 'The connection to the app server was lost. Check that "npm run dev" is still running in the terminal, then try again.', isError: true };
     } finally {
       clearTimeout(idleTimer);
     }
@@ -363,6 +398,7 @@ const AIAssistantModal = ({
     const queryText = textToSend || input;
     if (!queryText.trim() || isTyping) return;
 
+    // Add user message
     const userMsg = {
       id: Date.now(),
       sender: 'user',
@@ -374,10 +410,13 @@ const AIAssistantModal = ({
     if (!textToSend) setInput('');
     setIsTyping(true);
 
+    // Built-in shortcuts run only when asked for on purpose, so normal questions
+    // (even ones containing words like "profit" or "assign") always go to the real AI.
     const fromQuickPrompt = textToSend !== null;
     const isAssignCommand = /^\s*(assign|delegate|give task|create task)\b/i.test(queryText);
 
-    const assignmentResponse = (fromQuickPrompt || isAssignCommand) ? checkWorkAssignmentIntent(queryText) : null;
+    // Handle a direct task-assignment command before sending it to the AI.
+    const assignmentResponse = (fromQuickPrompt || isAssignCommand) ? await checkWorkAssignmentIntent(queryText) : null;
     if (assignmentResponse) {
       setTimeout(() => {
         setMessages(prev => [...prev, {
@@ -385,6 +424,7 @@ const AIAssistantModal = ({
           sender: 'ai',
           model: BUILT_IN_LABEL,
           text: assignmentResponse.text,
+          isError: assignmentResponse.isError,
           action: assignmentResponse.action,
           timestamp: timeNow()
         }]);
@@ -393,6 +433,7 @@ const AIAssistantModal = ({
       return;
     }
 
+    // Step C: Ask the real AI, sending the recent conversation so it remembers context
     const history = [...messages, userMsg]
       .filter(msg => !msg.local && !msg.isError)
       .slice(-6)
@@ -406,6 +447,7 @@ const AIAssistantModal = ({
 
     const aiResult = await fetchAIResponse(history, (textSoFar, model) => {
       if (!started) {
+        // First words arrived: show the answer bubble and let it grow
         started = true;
         setIsStreaming(true);
         setMessages(prev => [...prev, { id: replyId, sender: 'ai', model, text: textSoFar, timestamp: timeNow() }]);
@@ -422,13 +464,11 @@ const AIAssistantModal = ({
       isError: aiResult.isError,
       timestamp: timeNow()
     };
-    
     setMessages(prev => (
       prev.some(msg => msg.id === replyId)
         ? prev.map(msg => (msg.id === replyId ? finalMessage : msg))
         : [...prev, finalMessage]
     ));
-    
     setIsStreaming(false);
     setIsTyping(false);
   };
@@ -479,7 +519,7 @@ const AIAssistantModal = ({
               justify: 'center',
               boxShadow: '0 0 14px rgba(16, 163, 127, 0.4)'
             }}>
-              <Sparkles color="#ffffff" size="{22}"/>
+              <Sparkles size={22} color="#ffffff" />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -488,7 +528,11 @@ const AIAssistantModal = ({
                   {statusBadge.label}
                 </span>
               </div>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Knows Your Company • Ask Anything • Assign Tasks</p>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                {canAssignTasks(currentUser?.role)
+                  ? 'Knows Your Company • Ask Anything • Assign Tasks'
+                  : 'Knows Your Company • Ask Anything'}
+              </p>
             </div>
           </div>
 
@@ -498,13 +542,13 @@ const AIAssistantModal = ({
               title="Clear chat context"
               style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
             >
-              <Trash2 size="{16}"/>
+              <Trash2 size={16} />
             </button>
             <button 
               onClick={onClose}
               style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
             >
-              <X size="{20}"/>
+              <X size={20} />
             </button>
           </div>
         </div>
@@ -520,7 +564,7 @@ const AIAssistantModal = ({
           fontSize: '11px'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Cpu color="var(--neon-cyan)" size="{13}"/>
+            <Cpu size={13} color="var(--neon-cyan)" />
             <span style={{ color: 'var(--text-muted)' }}>AI Model:</span>
             <select
               value={selectedModel}
@@ -535,7 +579,7 @@ const AIAssistantModal = ({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Sliders color="var(--primary-accent)" size="{13}"/>
+            <Sliders size={13} color="var(--primary-accent)" />
             <span style={{ color: 'var(--text-muted)' }}>Mode:</span>
             <select
               value={selectedTone}
@@ -555,7 +599,14 @@ const AIAssistantModal = ({
           {quickPrompts.map((p, idx) => (
             <button
               key={idx}
-              onClick={() => handleSend(p.query)}
+              onClick={() => {
+                if (p.action === 'assign') {
+                  onClose();
+                  onOpenAssignModal(null);
+                  return;
+                }
+                handleSend(p.query);
+              }}
               style={{
                 backgroundColor: 'var(--bg-card)',
                 border: '1px solid var(--border-color)',
@@ -600,7 +651,7 @@ const AIAssistantModal = ({
                   flexShrink: 0,
                   boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
                 }}>
-                  {msg.sender === 'user' ? <User color="#ffffff" size="{16}"/> : <Bot color="#ffffff" size="{16}"/>}
+                  {msg.sender === 'user' ? <User size={16} color="#ffffff" /> : <Bot size={16} color="#ffffff" />}
                 </div>
 
                 <div style={{
@@ -625,7 +676,7 @@ const AIAssistantModal = ({
                         onClick={() => handleCopy(msg.id, msg.text)}
                         style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px' }}
                       >
-                        {copiedId === msg.id ? <Check color="var(--neon-green)" size="{12}"/> : <Copy size="{12}"/>}
+                        {copiedId === msg.id ? <Check size={12} color="var(--neon-green)" /> : <Copy size={12} />}
                         <span>{copiedId === msg.id ? 'Copied!' : 'Copy'}</span>
                       </button>
                     </div>
@@ -635,7 +686,7 @@ const AIAssistantModal = ({
                   {msg.sender === 'user' ? (
                     <div style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{msg.text}</div>
                   ) : (
-                    <MarkdownText text="{msg.text}"/>
+                    <MarkdownText text={msg.text} />
                   )}
 
                   {/* Dynamic Action Trigger */}
@@ -661,7 +712,7 @@ const AIAssistantModal = ({
                       }}
                     >
                       <span>{msg.action.label}</span>
-                      <ArrowRight size="{14}"/>
+                      <ArrowRight size={14} />
                     </button>
                   )}
                 </div>
@@ -674,7 +725,7 @@ const AIAssistantModal = ({
 
           {isTyping && !isStreaming && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10a37f', fontSize: '12px', padding: '8px' }}>
-              <RefreshCw className="spin" size="{14}"/>
+              <RefreshCw size={14} className="spin" />
               <span>AI is thinking...</span>
             </div>
           )}
@@ -704,7 +755,7 @@ const AIAssistantModal = ({
             className="btn-primary"
             style={{ padding: '8px 16px', height: '40px', opacity: isTyping ? 0.5 : 1, cursor: isTyping ? 'not-allowed' : 'pointer' }}
           >
-            <Send size="{15}"/>
+            <Send size={15} />
           </button>
         </form>
       </div>

@@ -67,7 +67,7 @@ def add_sample_documents(db: Session) -> int:
         exists = db.query(models.Document).filter(models.Document.title == data["title"]).first()
         if exists:
             continue
-        db.add(models.Document(**data))
+        db.add(models.Document(**data, is_sample=True))
         added += 1
     db.commit()
     return added

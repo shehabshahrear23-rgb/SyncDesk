@@ -1,9 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { Search, User, Kanban, FileText, Sparkles, X, ArrowRight } from 'lucide-react';
-import { employees, kanbanTasks, documentLibrary } from '../data/mockData';
+import { employees } from '../data/mockData';
+import { getToken } from '../utils/auth';
 
-const GlobalSearchModal = ({ isOpen, onClose, onSelectModule }) => {
+const GlobalSearchModal = ({ isOpen, onClose, onSelectModule, tasks = [] }) => {
   const [query, setQuery] = useState('');
+  const [documents, setDocuments] = useState([]);
+  const [documentError, setDocumentError] = useState(() => (
+    getToken() ? '' : 'Sign in with a backend account to search accessible documents.'
+  ));
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const token = getToken();
+    if (!token) return undefined;
+
+    const controller = new AbortController();
+    const loadDocuments = async () => {
+      try {
+        const response = await fetch('/api/documents', {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(typeof data?.detail === 'string' ? data.detail : 'Could not load accessible documents.');
+        }
+        setDocuments(Array.isArray(data) ? data : []);
+        setDocumentError('');
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        setDocuments([]);
+        setDocumentError(error instanceof Error ? error.message : 'Could not load accessible documents.');
+      }
+    };
+
+    loadDocuments();
+    return () => controller.abort();
+  }, [isOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -30,14 +64,14 @@ const GlobalSearchModal = ({ isOpen, onClose, onSelectModule }) => {
     e.department.toLowerCase().includes(query.toLowerCase())
   );
 
-  const filteredTasks = kanbanTasks.filter(t => 
+  const filteredTasks = tasks.filter(t => 
     t.title.toLowerCase().includes(query.toLowerCase()) || 
     t.project.toLowerCase().includes(query.toLowerCase())
   );
 
-  const filteredDocs = documentLibrary.filter(d => 
-    d.title.toLowerCase().includes(query.toLowerCase()) ||
-    d.category.toLowerCase().includes(query.toLowerCase())
+  const filteredDocs = documents.filter(d =>
+    String(d?.title ?? '').toLowerCase().includes(query.toLowerCase()) ||
+    String(d?.category ?? '').toLowerCase().includes(query.toLowerCase())
   );
 
   return (
@@ -203,6 +237,11 @@ const GlobalSearchModal = ({ isOpen, onClose, onSelectModule }) => {
               )}
 
               {/* Document Results */}
+              {documentError && (
+                <p role="status" style={{ margin: '8px 12px 12px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {documentError}
+                </p>
+              )}
               {filteredDocs.length > 0 && (
                 <div>
                   <p style={{ fontSize: '11px', color: 'var(--text-dim)', textTransform: 'uppercase', padding: '6px 12px', fontWeight: '600' }}>
@@ -225,7 +264,7 @@ const GlobalSearchModal = ({ isOpen, onClose, onSelectModule }) => {
                         <FileText size={16} color="var(--neon-green)" />
                         <div>
                           <p style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>{d.title}</p>
-                          <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{d.category} • {d.size}</p>
+                          <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{d.category} • {d.file_size}</p>
                         </div>
                       </div>
                     </div>

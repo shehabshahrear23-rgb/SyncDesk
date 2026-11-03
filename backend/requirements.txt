@@ -10,3 +10,5 @@ bcrypt
 PyJWT
 httpx
 python-multipart
+websockets
+Pillow

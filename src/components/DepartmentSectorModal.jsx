@@ -15,7 +15,7 @@ import {
   Clock, 
   CheckCircle2 
 } from 'lucide-react';
-import { employees, kanbanTasks } from '../data/mockData';
+import { employees } from '../data/mockData';
 
 const DepartmentSectorModal = ({ isOpen, onClose, node, onNavigateModule, onSelectDepartment, onOpenAssignModal }) => {
   if (!isOpen || !node) return null;
@@ -155,8 +155,6 @@ const DepartmentSectorModal = ({ isOpen, onClose, node, onNavigateModule, onSele
 
   const sector = getSectorDetails(node.id);
   const sectorEmployees = employees.filter(e => sector.department === 'All' || e.department === sector.department);
-  const sectorTasks = kanbanTasks.filter(t => sector.department === 'All' || t.project.toLowerCase().includes(sector.department.toLowerCase()));
-
   const handleOpenDepartmentView = () => {
     onSelectDepartment(sector.department);
     onNavigateModule(sector.moduleTarget);

@@ -1,37 +1,35 @@
-from pydantic_settings import BaseSettings
+from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "SyncDesk API"
-
-    # Database
+    PROJECT_NAME: str = "SyncDesk"
+    
+    # JWT Authentication Settings
+    SECRET_KEY: str = "gnQySvDUJ0WBLsKGG3tQghAp5fkWQjfRsSnIGCdGinE"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
+    
+    # PostgreSQL Database Credentials
     POSTGRES_SERVER: str = "localhost"
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "syncdesk"
     POSTGRES_PORT: str = "5432"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "1234"
+    POSTGRES_DB: str = "syncdesk_db"
 
-    @property
-    def SQLALCHEMY_DATABASE_URI(self) -> str:
-        return "sqlite:///./syncdesk.db"
-
-    # Redis
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
 
-    # Auth / JWT
-    # Override SECRET_KEY in backend/.env before deploying anywhere:
-    #   SECRET_KEY=<output of: python -c "import secrets; print(secrets.token_hex(32))">
-    SECRET_KEY: str = "dev-only-secret-change-me-in-env-file-0123456789"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-
-    # AI assistant (Groq). The key lives only in backend/.env as GROQ_API_KEY=...
-    GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "openai/gpt-oss-120b"
+    # AI Integration Settings - Must remain None here to read from .env!
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: str = "llama3-8b-8192"
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"  # other lines in .env must not stop the server from starting
+    @property
+    def SQLALCHEMY_DATABASE_URI(self) -> str:
+        """Dynamically builds the PostgreSQL connection string."""
+        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    # Consolidated into a single model_config declaration
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True, extra="ignore")
 
 settings = Settings()
