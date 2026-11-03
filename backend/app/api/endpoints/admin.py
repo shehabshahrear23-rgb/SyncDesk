@@ -85,6 +85,56 @@ def delete_user(user_id: int, db: Session = Depends(get_db), admin: models.User 
         {models.Task.assigned_by_id: None},
         synchronize_session=False,
     )
+    owned_groups = db.query(models.Conversation).filter(
+        models.Conversation.kind == "group",
+        models.Conversation.owner_id == user.id,
+    ).all()
+    for group in owned_groups:
+        successor = (
+            db.query(models.ConversationMember.user_id)
+            .filter(
+                models.ConversationMember.conversation_id == group.id,
+                models.ConversationMember.user_id != user.id,
+            )
+            .order_by(models.ConversationMember.joined_at, models.ConversationMember.user_id)
+            .first()
+        )
+        if successor:
+            group.owner_id = successor[0]
+        else:
+            db.query(models.Message).filter(
+                models.Message.conversation_id == group.id
+            ).delete(synchronize_session=False)
+            db.query(models.ConversationMember).filter(
+                models.ConversationMember.conversation_id == group.id
+            ).delete(synchronize_session=False)
+            db.delete(group)
+    direct_conversations = (
+        db.query(models.Conversation)
+        .join(
+            models.ConversationMember,
+            models.ConversationMember.conversation_id == models.Conversation.id,
+        )
+        .filter(
+            models.Conversation.kind == "direct",
+            models.ConversationMember.user_id == user.id,
+        )
+        .all()
+    )
+    for conversation in direct_conversations:
+        db.query(models.Message).filter(
+            models.Message.conversation_id == conversation.id
+        ).delete(synchronize_session=False)
+        db.query(models.ConversationMember).filter(
+            models.ConversationMember.conversation_id == conversation.id
+        ).delete(synchronize_session=False)
+        db.delete(conversation)
+    db.query(models.UserEncryptionKey).filter(
+        models.UserEncryptionKey.user_id == user.id
+    ).delete(synchronize_session=False)
+    db.query(models.ConversationMember).filter(
+        models.ConversationMember.user_id == user.id
+    ).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
     for storage_name in storage_names:
